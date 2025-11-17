@@ -1009,9 +1009,9 @@ inline void Configuration::validateConfiguration(void)
 				}
 				else if(!spectral_coordinate.n_spectral.has_value())
 				{
-					if(spectral_coordinate.max.value() - spectral_coordinate.min.value() > spectral_coordinate.increment.value())
+					if(spectral_coordinate.max.value() - spectral_coordinate.min.value() < spectral_coordinate.increment.value())
 					{
-						throw std::runtime_error("[Configuration::validateConfiguration] Spectral range error (width > increment).");
+						throw std::runtime_error("[Configuration::validateConfiguration] Spectral range error (width < increment).");
 					}
 				}
 				else if(!spectral_coordinate.increment.has_value())
@@ -1111,7 +1111,7 @@ inline void Configuration::validateConfiguration(void)
 				{
 					throw std::runtime_error("[Configuration::validateConfiguration] Gaussian sigma was not specified for instrument function.");
 				}
-				if(instrument.instrument_function_center.has_value())
+				if(!instrument.instrument_function_center.has_value())
 				{
 					throw std::runtime_error("[Configuration::validateConfiguration] Gaussian center was not specified for instrument function.");
 				}
@@ -1122,7 +1122,7 @@ inline void Configuration::validateConfiguration(void)
 				{
 					throw std::runtime_error("[Configuration::validateConfiguration] Rectangular width was not specified for instrument function.");
 				}
-				if(instrument.instrument_function_center.has_value())
+				if(!instrument.instrument_function_center.has_value())
 				{
 					throw std::runtime_error("[Configuration::validateConfiguration] Rectangular center was not specified for instrument function.");
 				}
@@ -1344,7 +1344,7 @@ inline void Configuration::validateConfiguration(void)
 	}
 	else if(atmosphere.vertical_pressure_profile.value() == VerticalPressureProfile::VIRA_EQUATOR || atmosphere.vertical_pressure_profile.value() == VerticalPressureProfile::VIRA_45 || atmosphere.vertical_pressure_profile.value() == VerticalPressureProfile::VIRA_60)
 	{
-		atmosphere.temperature_unit = {"km", "bar"};
+		atmosphere.pressure_unit = {"km", "bar"};
 		std::cout << "[Configuration::validateConfiguration] (z, pressure) unit automatically set (km, bar) for VIRA." << std::endl;
 
 		if(!atmosphere.vertical_pressure_interpolation.has_value())
@@ -1468,7 +1468,7 @@ inline void Configuration::validateConfiguration(void)
 		
 		if(!atmosphere.species_configuration[i].vertical_profile_interpolation.has_value())
 		{
-			atmosphere.vertical_number_density_interpolation = VerticalProfileInterpolation::Exponential;
+			atmosphere.species_configuration[i].vertical_profile_interpolation = VerticalProfileInterpolation::Exponential;
 			std::cout << "[Configuration::validateConfiguration] Vertical profile interpolation for species "+ std::to_string(i) + " was not specified. Automatically set to exponential." << std::endl;
 		}
 
@@ -1509,19 +1509,19 @@ inline void Configuration::validateConfiguration(void)
 		{
 			if(atmosphere.species_configuration[i].unit_vertical_profile.size() == 0)
 			{
-				atmosphere.number_density_unit = {atmosphere.z_unit.value(), "m-3"};
+				atmosphere.species_configuration[i].unit_vertical_profile = {atmosphere.z_unit.value(), "m-3"};
 				std::cout << "[Configuration::validateConfiguration] (z, vertical_profile) unit for species " + std::to_string(i) + " was not specified. Automatically set to (" << atmosphere.z_unit.value() << ", m-3)." << std::endl;
 			}
 			else if(atmosphere.species_configuration[i].unit_vertical_profile.size() == 1)
 			{
 				if(getUnitInfo(atmosphere.species_configuration[i].unit_vertical_profile[0].value()).dim == UnitDim::Length)
 				{
-					atmosphere.number_density_unit.push_back(std::optional<std::string>("m-3"));
+					atmosphere.species_configuration[i].unit_vertical_profile.push_back(std::optional<std::string>("m-3"));
 					std::cout << "[Configuration::validateConfiguration] Vertical profile unit for species " + std::to_string(i) + " was not specified. Automatically set to m-3." << std::endl;
 				}
 				else if(getUnitInfo(atmosphere.species_configuration[i].unit_vertical_profile[0].value()).dim == UnitDim::NumberDensity || getUnitInfo(atmosphere.species_configuration[i].unit_vertical_profile[0].value()).dim == UnitDim::ColumnNumberDensity)
 				{
-					atmosphere.number_density_unit.insert(atmosphere.number_density_unit.begin(), atmosphere.z_unit);
+					atmosphere.species_configuration[i].unit_vertical_profile.insert(atmosphere.species_configuration[i].unit_vertical_profile.begin(), atmosphere.z_unit);
 					std::cout << "[Configuration::validateConfiguration] z_unit for vertical profile for species " + std::to_string(i) + " was not specified. Automatically set to m." << std::endl;
 				}
 			}
@@ -1559,27 +1559,27 @@ inline void Configuration::validateConfiguration(void)
 					{
 						throw std::runtime_error("[Configuration::validateConfiguration] Paricle radius for species "+ std::to_string(i) + " was not specified.");
 					}
-					else if(atmosphere.species_configuration[i].r_g.has_value())
+					if(atmosphere.species_configuration[i].r_g.has_value())
 					{
 						std::cout << "[Configuration::validateConfiguration] r_g for species " << i << " was ignored." << std::endl;
 					}
-					else if(atmosphere.species_configuration[i].sigma_g.has_value())
+					if(atmosphere.species_configuration[i].sigma_g.has_value())
 					{
 						std::cout << "[Configuration::validateConfiguration] sigma_g for species " << i << " was ignored." << std::endl;
 					}
-					else if(atmosphere.species_configuration[i].r_mean.has_value())
+					if(atmosphere.species_configuration[i].r_mean.has_value())
 					{
 						std::cout << "[Configuration::validateConfiguration] r_mean for species " << i << " was ignored." << std::endl;
 					}
-					else if(atmosphere.species_configuration[i].sigma.has_value())
+					if(atmosphere.species_configuration[i].sigma.has_value())
 					{
 						std::cout << "[Configuration::validateConfiguration] sigma for species " << i << " was ignored." << std::endl;
 					}
-					else if(atmosphere.species_configuration[i].width.has_value())
+					if(atmosphere.species_configuration[i].width.has_value())
 					{
 						std::cout << "[Configuration::validateConfiguration] width for species " << i << " was ignored." << std::endl;
 					}
-					else if(atmosphere.species_configuration[i].count_radius.has_value())
+					if(atmosphere.species_configuration[i].count_radius.has_value())
 					{
 						std::cout << "[Configuration::validateConfiguration] count_radius for species " << i << " was ignored." << std::endl;
 					}
@@ -1599,23 +1599,23 @@ inline void Configuration::validateConfiguration(void)
 						{
 							std::cout << "[Configuration::validateConfiguration] r for species " << i << " was ignored." << std::endl;
 						}
-						else if(atmosphere.species_configuration[i].r_g.has_value())
+						if(atmosphere.species_configuration[i].r_g.has_value())
 						{
 							std::cout << "[Configuration::validateConfiguration] r_g for species " << i << " was ignored." << std::endl;
 						}
-						else if(atmosphere.species_configuration[i].sigma_g.has_value())
+						if(atmosphere.species_configuration[i].sigma_g.has_value())
 						{
 							std::cout << "[Configuration::validateConfiguration] sigma_g for species " << i << " was ignored." << std::endl;
 						}
-						else if(atmosphere.species_configuration[i].r_mean.has_value())
+						if(!atmosphere.species_configuration[i].r_mean.has_value())
 						{
 							throw std::runtime_error("[Configuration::validateConfiguration] r_mean for species "+ std::to_string(i) + " was not specified.");
 						}
-						else if(atmosphere.species_configuration[i].sigma.has_value())
+						if(!atmosphere.species_configuration[i].sigma.has_value())
 						{
 							throw std::runtime_error("[Configuration::validateConfiguration] sigma for species "+ std::to_string(i) + " was not specified.");
 						}
-						else if(atmosphere.species_configuration[i].width.has_value())
+						if(atmosphere.species_configuration[i].width.has_value())
 						{
 							std::cout << "[Configuration::validateConfiguration] width for species " << i << " was ignored." << std::endl;
 						}
@@ -1626,23 +1626,23 @@ inline void Configuration::validateConfiguration(void)
 						{
 							std::cout << "[Configuration::validateConfiguration] r for species " << i << " was ignored." << std::endl;
 						}
-						else if(atmosphere.species_configuration[i].r_g.has_value())
+						if(atmosphere.species_configuration[i].r_g.has_value())
 						{
 							std::cout << "[Configuration::validateConfiguration] r_g for species " << i << " was ignored." << std::endl;
 						}
-						else if(atmosphere.species_configuration[i].sigma_g.has_value())
+						if(atmosphere.species_configuration[i].sigma_g.has_value())
 						{
 							std::cout << "[Configuration::validateConfiguration] sigma_g for species " << i << " was ignored." << std::endl;
 						}
-						else if(atmosphere.species_configuration[i].r_mean.has_value())
+						if(!atmosphere.species_configuration[i].r_mean.has_value())
 						{
 							throw std::runtime_error("[Configuration::validateConfiguration] r_mean for species "+ std::to_string(i) + " was not specified.");
 						}
-						else if(atmosphere.species_configuration[i].sigma.has_value())
+						if(atmosphere.species_configuration[i].sigma.has_value())
 						{
 							std::cout << "[Configuration::validateConfiguration] sigma for species " << i << " was ignored." << std::endl;
 						}
-						else if(atmosphere.species_configuration[i].width.has_value())
+						if(!atmosphere.species_configuration[i].width.has_value())
 						{
 							throw std::runtime_error("[Configuration::validateConfiguration] width for species "+ std::to_string(i) + " was not specified.");
 						}
@@ -1653,23 +1653,23 @@ inline void Configuration::validateConfiguration(void)
 						{
 							std::cout << "[Configuration::validateConfiguration] r for species " << i << " was ignored." << std::endl;
 						}
-						else if(atmosphere.species_configuration[i].r_g.has_value())
+						if(!atmosphere.species_configuration[i].r_g.has_value())
 						{
 							throw std::runtime_error("[Configuration::validateConfiguration] r_g for species "+ std::to_string(i) + " was not specified.");
 						}
-						else if(atmosphere.species_configuration[i].sigma_g.has_value())
+						if(!atmosphere.species_configuration[i].sigma_g.has_value())
 						{
 							throw std::runtime_error("[Configuration::validateConfiguration] sigma_g for species "+ std::to_string(i) + " was not specified.");
 						}
-						else if(atmosphere.species_configuration[i].r_mean.has_value())
+						if(atmosphere.species_configuration[i].r_mean.has_value())
 						{
 							std::cout << "[Configuration::validateConfiguration] r_mean for species " << i << " was ignored." << std::endl;
 						}
-						else if(atmosphere.species_configuration[i].sigma.has_value())
+						if(atmosphere.species_configuration[i].sigma.has_value())
 						{
 							std::cout << "[Configuration::validateConfiguration] sigma for species " << i << " was ignored." << std::endl;
 						}
-						else if(atmosphere.species_configuration[i].width.has_value())
+						if(atmosphere.species_configuration[i].width.has_value())
 						{
 							std::cout << "[Configuration::validateConfiguration] width for species " << i << " was ignored." << std::endl;
 						}
