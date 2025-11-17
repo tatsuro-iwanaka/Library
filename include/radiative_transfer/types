@@ -94,13 +94,18 @@ const inline std::map<std::string, CrossSectionType> map_cross_section_type =
 	{"HITRAN", CrossSectionType::HITRAN}
 };
 
-enum class RefractiveIndexType{Constant, External, VerticalProfile};
-const inline std::map<std::string, RefractiveIndexType> map_refractive_index_type =
+enum class RefractiveIndexSpectrumType{Constant, External};
+const inline std::map<std::string, RefractiveIndexSpectrumType> map_refractive_index_spectrum_type =
 {
-	{"CONSTANT",  RefractiveIndexType::Constant},
-	{"EXTERNAL", RefractiveIndexType::External},
-	{"VERTICAL_PROFILE", RefractiveIndexType::VerticalProfile},
-	{"VERTICALPROFILE", RefractiveIndexType::VerticalProfile}
+	{"CONSTANT",  RefractiveIndexSpectrumType::Constant},
+	{"EXTERNAL", RefractiveIndexSpectrumType::External}
+};
+
+enum class RefractiveIndexVerticalProfile{Constant, Table};
+const inline std::map<std::string, RefractiveIndexVerticalProfile> map_refractive_index_vertical_profile_type =
+{
+	{"CONSTANT", RefractiveIndexVerticalProfile::Constant},
+	{"TABLE", RefractiveIndexVerticalProfile::Table}
 };
 
 enum class InCellSuperSamplingType{Enable, Disable};
@@ -240,7 +245,7 @@ class Species
 		VerticalProfileType vertical_profile_type = VerticalProfileType::MixingRatio;
 		ParticleSizeDistribution size_distribution = ParticleSizeDistribution::Delta;
 		// CrossSectionType cross_section_type = CrossSectionType::Constant;
-		RefractiveIndexType refractive_index_type = RefractiveIndexType::Constant;
+		RefractiveIndexSpectrumType refractive_index_type = RefractiveIndexSpectrumType::Constant;
 
 		CrossSectionType scattering_cross_section_type = CrossSectionType::Constant;
 		CrossSectionType absorption_cross_section_type = CrossSectionType::Constant;
@@ -522,30 +527,39 @@ class Configuration
 			std::optional<std::string> scattering_cross_section_unit;
 
 			// refractive index for mie scattering
+			// 何を計算すべきか？波長方向の積分はなし
+			// 粒径方向の積分はあり
+			// 高度方向は分布を与えても良い
+			// そうなると鉛直分布と屈折率のスペクトルインプットファイルは分けるべき
 			std::optional<std::string> unit_input_refractive_index_spectral;
-			std::optional<RefractiveIndexType> refractive_index_type; // constant, vertical profile, ...
+			std::optional<RefractiveIndexSpectrumType> refractive_index_spectrum_type; // constant, external
+			std::optional<RefractiveIndexVerticalProfile> refractive_index_vertical_profile_type; // constant, vertical_profile
 			// std::optional<UnitDim> dimension_x_input_refractive_index; // spectral dimension
 			std::optional<double> nr;	//real part of refractive index n = nr - i * ni
 			std::optional<double> ni;	//imaginary part of refractive index n = nr - i * ni
+			std::vector<std::vector<double>> refractive_index_vertical_profile; // m, nr, ni
+			bool is_refractive_index_same_layering_atmosphere = false;
+			std::optional<std::string> unit_refractive_index_vertical_profile;
 
-			// size distribution
+			// size distribution (Mie)
 			std::optional<ParticleSizeDistribution> size_distribution; // delta, gaussian, log-normal, ...
 			std::optional<std::string> unit_input_radius;
 			std::optional<int> count_radius; // sampling
 			std::optional<double> r; // m, for delta
 			std::optional<double> r_g; // m, for log-normal
 			std::optional<double> sigma_g; // m, for log-normal
-			std::optional<double> r_mean; // m, for gaussian
+			std::optional<double> r_mean; // m, for rectangular, gaussian
 			std::optional<double> sigma; // m, for gaussian
 			std::optional<double> width; // m, for rectangular
 
 			// for HG
 			std::optional<double> g_factor;	//g-factor for Henyey-Greenstein function
 			
-			std::vector<std::vector<double>> refractive_index_vertical_profile; // m, nr, ni
-			std::vector<std::vector<double>> absorption_cross_section_vertical_profile;
-			std::vector<std::vector<double>> scattering_cross_section_vertical_profile;
-			
+			// std::vector<std::vector<double>> absorption_cross_section_vertical_profile; // m, m2/molecule
+			// std::vector<std::vector<double>> scattering_cross_section_vertical_profile; // m, m2/molecule
+			// bool is_absorption_cross_section_same_layering_atmosphere = false;
+			// bool is_scattering_cross_section_same_layering_atmosphere = false;
+
 			std::optional<std::string> filename_scattering_cross_section;
 			std::optional<std::string> filename_absorption_cross_section;
 			std::optional<std::string> filename_refractive_index;
@@ -559,7 +573,7 @@ class Configuration
 			std::optional<IsotopologueType> isotopologue_type;
 			std::optional<IsotopologueAbundanceType> isotopologue_abundance_type;
 			// std::optional<int> global_id;
-			std::optional<std::string> filename_hitran;
+			// std::optional<std::string> filename_hitran;
 			// std::optional<hitran::Isotopologue> isotopologue;
 			// std::vector<hitran::Line> lines;
 			std::vector<double> abundance;
@@ -573,6 +587,7 @@ class Configuration
 			// std::optional<hitran::Diluent> diluent; // for HITRAN module
 			std::vector<std::string> diluent_species;
 			std::vector<double> diluent_ratio;
+			std::optional<std::string> filename_hitran;
 			
 			std::optional<VerticalTemperatureProfile> vertical_temperature_profile;
 			std::vector<std::vector<double>> temperature_profile; //m, K
