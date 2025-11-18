@@ -27,6 +27,345 @@
 namespace radiative_transfer
 {
 
+void normalizeScatteringPhaseFunction(std::vector<std::vector<double>>&);
+void computeMieScattering(int, double, double, std::complex<double>, double&, double&, double&, std::vector<std::vector<double>>&);
+void computeMieScatteringSizeDistribution(int, double, const std::vector<std::vector<double>>&, const std::vector<std::vector<double>>&, std::complex<double>, double&, double&, double&, std::vector<std::vector<double>>&);
+
+inline RadiativeTransferCalculator::RadiativeTransferCalculator(const Geometry& geometry)
+{
+	geometry_ = geometry;
+}
+
+inline RadiativeTransferResult RadiativeTransferCalculator::computeMonochrome(const AtmosphereModel& atmosphere_model, double spectrum, SpectralCoordinateDimenstion dimension)
+{
+	double wavelength;
+	double wavenumber;
+
+	if(dimension == SpectralCoordinateDimenstion::Wavenumber)
+	{
+		wavelength = 1.0 / spectrum;
+		wavenumber = spectrum;
+	}
+	else if(dimension == SpectralCoordinateDimenstion::Wavelength)
+	{
+		wavelength = spectrum;
+		wavenumber = 1.0 / spectrum;
+	}
+	else
+	{
+		throw std::runtime_error("[RadiativeTransferCalculator::computeMonochrome] Frequency calculation is not currently supported.");
+	}
+
+	int n_layer = atmosphere_model.altitude.size();
+	OpticalLayer surface_layer_opt;
+	RadiativeLayer surface_layer_rad;
+	std::vector<OpticalLayer> atmosphere_layer_opt(n_layer);
+	std::vector<RadiativeLayer> atmosphere_layer_rad(n_layer);
+	RadiativeLayer result_layer_rad;
+
+	if(atmosphere_model.surface_type == SurfaceType::Lambert)
+	{
+		;
+	}
+
+	for(int i = 0; i < n_layer; ++i)
+	{
+		// doubling -> adding
+		;
+	}
+
+	if(atmosphere_model.surface_type != SurfaceType::NoSurface)
+	{
+		// from surface to toa
+		;
+	}
+
+	RadiativeTransferResult result;
+	result.spectral_data.resize(1);
+	result.spectral_data[0].reflectance_m_top_cos = result_layer_rad.reflectance_m_top_cos;
+	// all other variables
+
+	return result;
+}
+
+inline void normalizeScatteringPhaseFunction(std::vector<std::vector<double>> &f)
+{
+	std::vector<std::vector<double>> phase_function_theta(f.size());
+
+	for(int i = 0; i < f.size(); i ++)
+	{
+		phase_function_theta[i] = {f[i][0], f[i][1] * 2.0 * PI * std::sin(f[i][0])};
+	}
+
+	double sum = computeSimpsonIntegration(phase_function_theta) / (4.0 * PI);
+
+	for(int i = 0; i < f.size(); i ++)
+	{
+		f[i][1] /= sum;
+	}
+
+	return;
+}
+
+inline void computeMieScattering(int n, double radius, double wavelength, std::complex<double> index, double& scattering_cross_section, double& absorption_cross_section, double& extinction_cross_section, std::vector<std::vector<double>>& phase_function)
+{
+	// Input validation
+	if (radius <= 0.0 || wavelength <= 0.0 || n < 2)
+	{
+		scattering_cross_section = 0.0;
+		absorption_cross_section = 0.0;
+		extinction_cross_section = 0.0;
+		phase_function.clear();
+		return;
+	}
+
+	// 1) サイズパラメータ x = π·D/λ
+	double diameter = 2.0 * radius;
+	double x = PI * diameter / wavelength;
+
+	// std::cout << wavelength << ", " << radius << ", " << x << std::endl;
+
+	// 2) 級数上限 N_stop
+	int nstop = int(std::floor(x + 4.05 * std::cbrt(x) + 2.0));
+
+	//std::cout << "Riccati-Bessel" << std::endl;
+
+	// 3) Riccati–Bessel 商 D_n(z) の計算
+	std::vector<std::complex<double>> DD(nstop + 1);
+
+	{
+		double threshold = (13.78 * index.real() - 10.8) * index.real() + 3.9;
+		auto z = x * index;
+		auto zinv = std::complex<double>(0.0, 0.0);
+	
+		if (std::abs(index.imag() * x) < threshold)
+		{
+			DD[0] = 1.0 / std::tan(z);
+			zinv  = 1.0 / z;
+			for (int i = 1; i <= nstop; ++i)
+			{
+				double k = double(i);
+				auto numerator = k * zinv;
+				DD[i] = 1.0 / (numerator - DD[i - 1]) - numerator;
+			}
+		}
+		else
+		{
+			auto zinv = 2.0 / z;
+			auto aj = -(nstop + 1.5) * zinv;
+			auto alpha_j1 = aj + 1.0 / ((nstop + 0.5) * zinv);
+			auto alpha_j2 = aj;
+			auto ratio = alpha_j1 / alpha_j2;
+			auto runratio = ((nstop + 0.5) * zinv) * ratio;
+
+			while (std::abs(std::abs(ratio) - 1.0) > 1e-12)
+			{
+				aj = zinv - aj;
+				alpha_j1 = 1.0 / alpha_j1 + aj;
+				alpha_j2 = 1.0 / alpha_j2 + aj;
+				ratio = alpha_j1 / alpha_j2;
+				runratio *= ratio;
+				zinv = -zinv;
+			}
+
+			DD[nstop] = -double(nstop) / z + runratio;
+			zinv = 1.0 / z;
+
+			for (int i = nstop - 1; i >= 0; --i)
+			{
+				double k = double(i + 1);
+				auto num = k * zinv;
+				DD[i] = num - 1.0 / (DD[i + 1] + num);
+			}
+		}
+	}
+
+	//std::cout << DD[nstop] << std::endl;
+
+	//std::cout << "a_n, b_n and Q" << std::endl;
+
+	// 4) Mie 係数 a_n, b_n と効率 Q の計算
+	std::vector<std::complex<double>> a(nstop), b(nstop);
+	double Qsca = 0.0;
+	double Qext = 0.0;
+
+	{
+		double psi0 = std::sin(x);
+		double psi1 = psi0 / x - std::cos(x);
+	
+		auto xi0 = std::complex<double>(psi0, -std::cos(x));
+		auto xi1 = std::complex<double>(psi1, -(std::cos(x) / x + std::sin(x)));
+
+		// double g = 0.0;
+		// double sign1 = 1.0;
+		// auto s1 = std::complex<double>(0.0, 0.0);
+		// auto s2 = std::complex<double>(0.0, 0.0);
+		// double pi0 = 0.0;
+		// double pi1 = 1.0;
+		// std::complex<double> ann_1(0.0, 0.0);
+		// std::complex<double> bnn_1(0.0, 0.0);
+
+		//std::cout << xi0 << ", " << xi1 << std::endl;
+
+		for (int i = 0; i < nstop; ++i)
+		{
+			a[i] = ((DD[i + 1] / index + double(i + 1) / x) * psi1 - psi0) / ((DD[i + 1] / index + double(i + 1) / x) * xi1 - xi0);
+			b[i] = ((DD[i + 1] * index + double(i + 1) / x) * psi1 - psi0) / ((DD[i + 1] * index + double(i + 1) / x) * xi1 - xi0);
+			
+			//double factor0 = (2.0 * double(i + 1) + 1.0) / double(i + 2) / double(i + 1);
+			//tau = double(i + 1) * mu * pi1 - double(i + 2) * pi0;
+			//double alpha = factor0 * pi1;
+			//double beta = factor0 * tau;
+			
+			//s1 = s1 + alpha * ann + beta * bnn;
+			//s2 = s2 + alpha * bnn + beta * ann;
+			
+			//factor0 = pi1;//((2*n+1)*mu[k]*pi1[k]-(n+1)*pi0[k])/n;
+			//pi1 = ((2.0 * double(i + 1) + 1.0) * mu * pi1 - double(i + 2) * pi0) / double(i + 1);
+			//pi0 = factor0;
+			
+			double factor0 = 2.0 * double(i + 1) + 1.0;
+			
+			//g = g + double(i) / double(i + 1) * (ann_1.real() * ann.real() + ann_1.imag() * ann.imag() + bnn_1.real() * bnn.real() + bnn_1.imag() * bnn.imag());
+			//g = g + factor0 / double(i + 1) / double(i + 2) * (ann.real() * bnn.real() + ann.imag() * bnn.imag());
+			Qsca = Qsca + factor0 * (std::abs(a[i]) * std::abs(a[i]) + std::abs(b[i]) * std::abs(b[i]));
+			Qext = Qext + factor0 * (a[i].real() + b[i].real());
+			
+			//sign1 = -sign1;
+			
+			factor0 = (2.0 * double(i + 1) + 1.0) / x;
+			std::complex<double> xi = factor0 * xi1 - xi0;
+			xi0 = xi1;
+			xi1 = xi;
+			
+			double psi = factor0 * psi1 - psi0;
+			psi0 = psi1;
+			psi1 = xi1.real();
+		}
+
+		//std::cout << xi0 << ", " << xi1 << ", " << psi0 << ", " << psi1 << std::endl;
+	}
+
+	// 5) 無次元効率 Q の正規化
+	Qsca = 2.0 * Qsca / (x * x);
+	Qext = 2.0 * Qext / (x * x);
+	double Qabs = Qext - Qsca;
+
+	// std::cout << "Qsca: " << Qsca << std::endl;
+	// std::cout << "Qabs: " << Qabs << std::endl;
+	// std::cout << "Qext: " << Qext << std::endl;
+
+	// 6) 断面積 [m^2] に変換
+	double area = PI * radius * radius;
+	scattering_cross_section = Qsca * area;
+	absorption_cross_section = Qabs * area;
+	extinction_cross_section = Qext * area;
+
+	//std::cout << "Scattering phase function" << std::endl;
+
+	// 7) 位相関数の計算
+	phase_function.clear();
+	phase_function.resize(n);
+	double dtheta = PI / double(n - 1);
+
+	//#pragma omp parallel for
+	for (int k = 0; k < n; ++k)
+	{
+		double theta = dtheta * double(k);
+		double mu = std::cos(theta);
+
+		std::complex<double> S1(0.0, 0.0);
+		std::complex<double> S2(0.0, 0.0);
+		double pi0 = 0.0;
+		double pi1 = 1.0;
+
+		for (int i = 0; i < nstop; ++i)
+		{
+			double weight = (2.0 * double(i + 1) + 1.0) / double(i + 2) / double(i + 1);
+			double tau = double(i + 1) * mu * pi1 - double(i + 2) * pi0;
+			// double tau = n_i * mu * pi1 - (n_i + 1) * pi0;
+
+			S1 += weight * (a[i] * pi1 + b[i] * tau);
+			S2 += weight * (b[i] * pi1 + a[i] * tau);
+
+			double pi2 = ((2.0 * double(i + 1) + 1.0) * mu * pi1 - double(i + 2) * pi0) / double(i + 1);
+			pi0 = pi1;
+			pi1 = pi2;
+		}
+
+		double s11 = 0.5 * (std::norm(S2) + std::norm(S1));
+		// double s12 = 0.5 * (std::norm(S2) - std::norm(S1));
+		// double pol = -s12 / s11;
+		// double s33 = (S2 * std::conj(S1)).real();
+		// double s34 = (S2 * std::conj(S1)).imag();
+		double natural = s11 / (PI * x * x * Qsca);
+		//double P11 = s11 / (PI * x * x * Qsca);
+
+		phase_function[k] = {theta, natural * 4.0 * PI};
+	}
+
+	return;
+}
+
+inline void computeMieScatteringSizeDistribution(int n_theta, double wavelength, const std::vector<std::vector<double>>& size_distribution, const std::vector<std::vector<double>>& weight, std::complex<double> index, double& scattering_cross_section, double& absorption_cross_section, double& extinction_cross_section, std::vector<std::vector<double>>& phase_function)
+{
+	int n_r = size_distribution.size();
+	// std::vector<double> scs(n_r);
+	// std::vector<double> acs(n_r);
+	// std::vector<std::vector<std::vector<double>>> pf(n_r, std::vector<std::vector<double>>(n_theta, std::vector<double>(2)));
+
+	double denom = 0.0;
+
+	absorption_cross_section = 0.0;
+	scattering_cross_section = 0.0;
+	phase_function = std::vector<std::vector<double>>(n_theta, std::vector<double>(2, 0.0));
+
+	double dtheta = PI / double(n_theta - 1);
+	for (int i = 0; i < n_theta; ++i)
+	{
+		phase_function[i][0] = dtheta * double(i);
+	}
+
+	for(int i = 0; i < n_r; ++i)
+	{
+		double scs, acs, ecs;
+		std::vector<std::vector<double>> pf;
+		double n_dr = size_distribution[i][1] * weight[i][1];
+		computeMieScattering(n_theta, size_distribution[i][0], wavelength, index, scs, acs, ecs, pf);
+		absorption_cross_section += acs * n_dr;
+		scattering_cross_section += scs * n_dr;
+		extinction_cross_section += ecs * n_dr;
+		denom += n_dr;
+
+		for(int j = 0; j < n_theta; ++j)
+		{
+			phase_function[j][1] += pf[j][1] * scs * n_dr;
+		}
+	}
+
+	absorption_cross_section /= denom;
+	scattering_cross_section /= denom;
+	extinction_cross_section /= denom;
+	
+	normalizeScatteringPhaseFunction(phase_function);
+
+	return;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 JacobianResult computeJacobian(std::string, JacobianType, double);
 JacobianResult computeJacobianSpecies(std::string, JacobianType, int, double);
 JacobianResult computeJacobianRefractiveIndex(std::string, std::vector<int>, double);
@@ -35,14 +374,15 @@ inline void RadiativeTransfer::importConfiguration(void)
 {
 	try
 	{
-		configuration.importConfiguration(config_filename);
+		configuration = ConfigurationLoader::load(config_filename);
+		configuration.validateConfiguration();
 	}
 	catch(const std::exception &e)
 	{
 		std::cerr << "Configuration import failed: " << e.what() << std::endl;
 	}
 
-	std::filesystem::create_directory(configuration.directory_name + "result");
+	std::filesystem::create_directory(configuration.simulation.directory_name.value() + "result");
 	// std::filesystem::create_directory(configuration.directory_name + "log");
 
 	return;

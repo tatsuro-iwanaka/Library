@@ -251,9 +251,9 @@ inline Configuration::SpectralCoordinate ConfigurationLoader::loadSpectralCoordi
 	return spectral_coordinate;
 }
 
-inline Configuration::Geometry ConfigurationLoader::loadGeometry_(const std::map<std::string, std::string>& kv)
+inline Configuration::GeometryConfiguration ConfigurationLoader::loadGeometry_(const std::map<std::string, std::string>& kv)
 {
-	Configuration::Geometry geometry;
+	Configuration::GeometryConfiguration geometry;
 
 	std::string prefix = "simulation.grid.";
 

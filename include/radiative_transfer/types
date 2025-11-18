@@ -236,106 +236,153 @@ class UnitInfo
 
 class Species
 {
+	// ヤコビアン計算に必要な最低限を残す
+	// 微小変化させるのはこのSpecies
+	// これを微小変化させた後に放射計算の準備
+	// これを使ってMie計算を行う
+	// Mie計算に必要なのは複素屈折率，粒径分布
+	// 数密度（混合比）の鉛直分布
+	// 複素屈折率の鉛直分布
+	// 吸収断面積，散乱断面積
+	private:
+		std::string name_;
+		SpeciesState species_state_;
+		SpeciesType species_type_;
+		ScatterType scatter_type_ ;
+
+		std::vector<std::vector<double>> particle_size_distribution_; // spectral, size_distribution
+		std::vector<std::vector<double>> weight_particle_size_distribution_; // spectral, weights
+
+		double g_factor_;	//g-factor for Henyey-Greenstein function
+
+		double absorption_cross_section_;	//m^2/molecule
+		double scattering_cross_section_;	//m^2/molecule
+
+		std::vector<double> vertical_number_density_profile_;	// m-3
+		std::vector<double> vertical_mixing_ratio_profile_;	// mol/mol
+		std::vector<std::vector<double>> refractive_index_vertical_profile_; // nr, ni
+
 	public:
-		std::string name;
-		SpeciesState species_state = SpeciesState::Molecule;
-		SpeciesType species_type = SpeciesType::Absorber;
-		ScatterType scatter_type = ScatterType::Isotropic;
-		VerticalProfileInterpolation vertical_profile_interpolation = VerticalProfileInterpolation::Exponential;
-		VerticalProfileType vertical_profile_type = VerticalProfileType::MixingRatio;
-		ParticleSizeDistribution size_distribution = ParticleSizeDistribution::Delta;
-		// CrossSectionType cross_section_type = CrossSectionType::Constant;
-		RefractiveIndexSpectrumType refractive_index_type = RefractiveIndexSpectrumType::Constant;
+		const std::string& name(void) const;
+		const SpeciesState& species_state(void) const;
+		const SpeciesType& species_type(void) const;
+		const ScatterType& scatter_type(void) const;
+		const std::vector<std::vector<double>>& particle_size_distribution(void) const;
+		const std::vector<std::vector<double>>& weight_particle_size_distribution(void) const;
+		double g_factor(void) const;
+		double absorption_cross_section(void) const;
+		double scattering_cross_section(void) const;
+		const std::vector<double>& vertical_number_density_profile(void) const;
+		const std::vector<double>& vertical_mixing_ratio_profile(void) const;
+		const std::vector<std::vector<double>>& refractive_index_vertical_profile(void) const;
 
-		CrossSectionType scattering_cross_section_type = CrossSectionType::Constant;
-		CrossSectionType absorption_cross_section_type = CrossSectionType::Constant;
-
-		std::string unit_input_absorption_cross_section = "m2";
-		std::string unit_input_absorption_wavelength = "m";
-		std::string unit_input_absorption_wavenumber = "m-1";
-		UnitDim unit_x_input_absorption = UnitDim::Length;
-
-		std::string unit_input_scattering_cross_section = "m2";
-		std::string unit_input_scattering_wavelength = "m";
-		std::string unit_input_scattering_wavenumber = "m-1";
-		UnitDim unit_x_input_scattering = UnitDim::Length;
-
-		std::string unit_input_refractive_index_wavelength = "m";
-		std::string unit_input_refractive_index_wavenumber = "m-1";
-		UnitDim unit_x_input_refractive_index = UnitDim::Length;
-
-		std::string unit_input_radius = "m";
-
-		double scale_cross_section = 1.0;
-
-		double size = 0.1E-6; // m
-		double r_g = 0.1E-6; // m
-		double sigma_g = 0.15E-6; // m
-		double r_mean = 0.1E-6; // m
-		double sigma = 0.15E-6; // m
-		int n_radius = 1001;
-		double width = 0.15E-6; // m
-
-		//double radius = 1.0E-6; // m
-
-		//std::vector<std::vector<double>> particle_size_distribution;	//size (micron), number_density (molecule/m^3)
-
-		double g_factor;	//g-factor for Henyey-Greenstein function
-		
-		double nr = 1.5;	//real part of refractive index n = nr - i * ni
-		double ni = 0.0;	//imaginary part of refractive index n = nr - i * ni
-
-		std::vector<std::vector<double>> refractive_index_vertical_profile; // m, nr, ni
-		std::vector<std::vector<double>> absorption_cross_section_vertical_profile;
-		std::vector<std::vector<double>> scattering_cross_section_vertical_profile;
-		
-		double absorption_cross_section = 0.0;	//m^2/molecule
-		double scattering_cross_section = 0.0;	//m^2/molecule
-
-		std::vector<std::vector<double>> vertical_profile;	//m, mol/mol
-		bool is_same_layering_atmosphere = false;
-
-		std::string filename_scattering_cross_section;
-		std::string filename_absorption_cross_section;
-		std::string filename_refractive_index;
-		std::string filename_size_distribution;
-
-		std::vector<std::vector<double>> scattering_phase_function;
-
-		double computeMixingRatio(double);
-		double computeNumberDensity(double);
-		std::complex<double> computeRefractiveIndex(double);
-
-		int molecule_id;
-		int local_isotopologue_id;
-		int global_id;
-		std::string filename_hitran;
-		hitran::Isotopologue isotopologue;
-		std::vector<hitran::Line> lines;
-		double abundance = 1.0;
+		void name(const std::string&);
+		void species_state(const SpeciesState&);
+		void species_type(const SpeciesType&);
+		void scatter_type(const ScatterType&);
+		void particle_size_distribution(const std::vector<std::vector<double>>&);
+		void weight_particle_size_distribution(const std::vector<std::vector<double>>&);
+		void g_factor(double);
+		void absorption_cross_section(double);
+		void scattering_cross_section(double);
+		void vertical_number_density_profile(const std::vector<double>&);
+		void vertical_mixing_ratio_profile(const std::vector<double>&);
+		void refractive_index_vertical_profile(const std::vector<std::vector<double>>&);
 };
 
-class Geometry //for Fourier-AD
+struct OpticalLayer
 {
 	public:
-		int M;
-		int Ntheta;
-		int Nphi;
+		double planck_function; // IR計算用 プランク関数
+		double absorption_coefficient; //m-1
+		double scattering_coefficient; //m-1
+		double optical_thickness; //dimensionless
+		double single_scattering_albedo; //ks/(ks + ka)
 
-		double d_phi;
+		int n_doubling = 0;
 
-		Eigen::VectorXd weight_uh;
-		Eigen::VectorXd weight_lh;
-		Eigen::VectorXd theta_uh;
-		Eigen::VectorXd theta_lh;
-		Eigen::VectorXd theta_all;
-		Eigen::VectorXd mu_uh;
-		Eigen::VectorXd mu_lh;
+		double asymmetry_parameter;
 
-		Eigen::VectorXd phi;
+		std::vector<std::vector<double>> scattering_phase_function;	//angle (radian), magnitude (dimensionless)
+};
 
-		Eigen::MatrixXd WMU_uh;
-		Eigen::MatrixXd WMU_lh;
+struct RadiativeLayer
+{
+	public:
+		std::vector<Eigen::MatrixXd> reflectance_m_top_cos;
+		std::vector<Eigen::MatrixXd> reflectance_m_bottom_cos;
+		std::vector<Eigen::MatrixXd> transmittance_m_top_cos;
+		std::vector<Eigen::MatrixXd> transmittance_m_bottom_cos;
+
+		std::vector<Eigen::MatrixXd> reflectance_m_top_sin;
+		std::vector<Eigen::MatrixXd> reflectance_m_bottom_sin;
+		std::vector<Eigen::MatrixXd> transmittance_m_top_sin;
+		std::vector<Eigen::MatrixXd> transmittance_m_bottom_sin;
+
+		double optical_thickness; //dimensionless
+};
+
+struct AtmosphereModel
+{
+	public:
+		std::vector<Species> species;
+		SurfaceType surface_type;
+		double surface_temperature;
+		double surface_albedo;
+		std::vector<double> altitude_bottom;
+		std::vector<double> altitude_top;
+		std::vector<double> altitude;
+		std::vector<double> temperature;
+		std::vector<double> pressure;
+		std::vector<double> number_density;
+		hitran::Diluent diluent;
+		// bool enable_atmospheric_emission = false;
+};
+
+class SpectralCalculator
+{
+	private:
+		Configuration configuration_;
+		AtmosphereModel atmosphere_model_;
+		RadiativeTransferCalculator radiative_transfer_;
+
+		RadiativeTransferResult convolve_(const RadiativeTransferResult& radiative_transfer_result);
+		
+	public:
+		SpectralCalculator(const Configuration&, const AtmosphereModel&, const RadiativeTransferCalculator&);
+		RadiativeTransferResult calculate(void);
+};
+
+/*
+class AtmosphereModel
+{
+	private:
+		
+	public:		
+		std::vector<Layer> layers;
+		Layer surface_layer;
+		Layer result_layer;
+		std::vector<Species> species;
+
+		hitran::Diluent diluent = hitran::Diluent(1.0, 0.0, 0.0, 0.0, 0.0);
+
+		// int M = -99;
+		// int Ntheta;
+		// int Nphi = -99;
+
+		std::optional<int> M;
+		std::optional<int> Ntheta;
+		std::optional<int> Nphi;
+		
+		// std::ofstream log_out;
+
+		const int radius_n = 1001;
+		const int theta_n = 1001;
+
+		AtmosphereModel(void)
+		{
+			return;
+		}
 };
 
 class Layer
@@ -393,35 +440,104 @@ class Layer
 		void exportPhaseFunction(std::string);
 };
 
-class AtmosphereModel
+class Species
 {
 	private:
+		std::string name_;
+		SpeciesState species_state_ = SpeciesState::Molecule;
+		SpeciesType species_type_ = SpeciesType::Absorber;
+		ScatterType scatter_type_ = ScatterType::Isotropic;
+		VerticalProfileInterpolation vertical_profile_interpolation_ = VerticalProfileInterpolation::Exponential;
+		VerticalProfileType vertical_profile_type_ = VerticalProfileType::MixingRatio;
+		ParticleSizeDistribution size_distribution_ = ParticleSizeDistribution::Delta;
+		RefractiveIndexSpectrumType refractive_index_type_ = RefractiveIndexSpectrumType::Constant;
+		CrossSectionType scattering_cross_section_type_ = CrossSectionType::Constant;
+		CrossSectionType absorption_cross_section_type_ = CrossSectionType::Constant;
+
+		std::string unit_input_absorption_cross_section_ = "m2";
+		std::string unit_input_absorption_wavelength_ = "m";
+		std::string unit_input_absorption_wavenumber_ = "m-1";
+		UnitDim unit_x_input_absorption_ = UnitDim::Length;
+
+		std::string unit_input_scattering_cross_section_ = "m2";
+		std::string unit_input_scattering_wavelength_ = "m";
+		std::string unit_input_scattering_wavenumber_ = "m-1";
+		UnitDim unit_x_input_scattering_ = UnitDim::Length;
+
+		std::string unit_input_refractive_index_wavelength_ = "m";
+		std::string unit_input_refractive_index_wavenumber_ = "m-1";
+		UnitDim unit_x_input_refractive_index_ = UnitDim::Length;
+
+		std::string unit_input_radius_ = "m";
+
+		// double scale_cross_section_ = 1.0;
+
+		double size_ = 0.1E-6; // m
+		double r_g_ = 0.1E-6; // m
+		double sigma_g_ = 0.15E-6; // m
+		double r_mean_ = 0.1E-6; // m
+		double sigma_ = 0.15E-6; // m
+		int n_radius_ = 1001;
+		double width_ = 0.15E-6; // m
+
+		double g_factor_;	//g-factor for Henyey-Greenstein function
 		
-	public:		
-		std::vector<Layer> layers;
-		Layer surface_layer;
-		Layer result_layer;
-		std::vector<Species> species;
+		double nr_ = 1.5;	//real part of refractive index n = nr - i * ni
+		double ni_ = 0.0;	//imaginary part of refractive index n = nr - i * ni
 
-		hitran::Diluent diluent = hitran::Diluent(1.0, 0.0, 0.0, 0.0, 0.0);
-
-		// int M = -99;
-		// int Ntheta;
-		// int Nphi = -99;
-
-		std::optional<int> M;
-		std::optional<int> Ntheta;
-		std::optional<int> Nphi;
+		std::vector<std::vector<double>> refractive_index_vertical_profile_; // m, nr, ni
+		std::vector<std::vector<double>> absorption_cross_section_vertical_profile_;
+		std::vector<std::vector<double>> scattering_cross_section_vertical_profile_;
 		
-		// std::ofstream log_out;
+		double absorption_cross_section_ = 0.0;	//m^2/molecule
+		double scattering_cross_section_ = 0.0;	//m^2/molecule
 
-		const int radius_n = 1001;
-		const int theta_n = 1001;
+		std::vector<std::vector<double>> vertical_profile_;	//m, mol/mol
+		bool is_same_layering_atmosphere_ = false;
 
-		AtmosphereModel(void)
-		{
-			return;
-		}
+		std::string filename_scattering_cross_section_;
+		std::string filename_absorption_cross_section_;
+		std::string filename_refractive_index_;
+		std::string filename_size_distribution_;
+
+		std::vector<std::vector<double>> scattering_phase_function_;
+
+		int molecule_id_;
+		int local_isotopologue_id_;
+		int global_id_;
+		std::string filename_hitran_;
+		hitran::Isotopologue isotopologue_;
+		std::vector<hitran::Line> lines_;
+		double abundance_ = 1.0;
+
+	public:
+		double computeMixingRatio(double);
+		double computeNumberDensity(double);
+		std::complex<double> computeRefractiveIndex(double);
+};
+*/
+
+struct Geometry //for Fourier-AD
+{
+	public:
+		int M;
+		int Ntheta;
+		int Nphi;
+
+		double d_phi;
+
+		Eigen::VectorXd weight_uh;
+		Eigen::VectorXd weight_lh;
+		Eigen::VectorXd theta_uh;
+		Eigen::VectorXd theta_lh;
+		Eigen::VectorXd theta_all;
+		Eigen::VectorXd mu_uh;
+		Eigen::VectorXd mu_lh;
+
+		Eigen::VectorXd phi;
+
+		Eigen::MatrixXd WMU_uh;
+		Eigen::MatrixXd WMU_lh;
 };
 
 class Configuration
@@ -443,7 +559,7 @@ class Configuration
 			std::optional<bool> enable_atmospheric_emission;
 		};
 
-		struct Geometry
+		struct GeometryConfiguration
 		{
 			std::optional<int> n_theta;
 			std::optional<int> n_phi;
@@ -616,7 +732,7 @@ class Configuration
 		};
 
 		Simulation simulation;
-		Geometry geometry;
+		GeometryConfiguration geometry;
 		DeltaM delta_m;
 		SpectralCoordinate spectral_coordinate;
 		Instrument instrument;
@@ -643,7 +759,7 @@ class ConfigurationLoader
 		static Configuration::Simulation loadSimulation_(const std::map<std::string, std::string>&);
 		static Configuration::Surface loadSurface_(const std::map<std::string, std::string>&);
 		static Configuration::Atmosphere loadAtmosphere_(const std::map<std::string, std::string>&);
-		static Configuration::Geometry loadGeometry_(const std::map<std::string, std::string>&);
+		static Configuration::GeometryConfiguration loadGeometry_(const std::map<std::string, std::string>&);
 		static Configuration::DeltaM loadDeltaM_(const std::map<std::string, std::string>&);
 		static Configuration::Instrument loadInstrument_(const std::map<std::string, std::string>&);
 		static Configuration::SpectralCoordinate loadSpectralCoordinate_(const std::map<std::string, std::string>&);
@@ -669,6 +785,80 @@ class ConfigurationLoader
 		template<typename EnumT> static std::optional<EnumT> parseEnum_(const std::optional<std::string>&, const std::map<std::string, EnumT>&);
 };
 
+class MonochromeData
+{
+	public:
+		std::vector<std::vector<std::vector<double>>> reflectance_top; // e, i, p?
+
+		std::vector<Eigen::MatrixXd> reflectance_m_top_cos; // m, e, i
+		std::vector<Eigen::MatrixXd> reflectance_m_top_sin; // m, e, i
+
+		Eigen::VectorXd source_up; // e
+
+		std::vector<double> absorption_coefficient; // altitude
+		std::vector<double> scattering_coefficient; // altitude
+		std::vector<double> single_scattering_albedo; // altitude
+		std::vector<double> optical_thickness; // altitude
+		std::vector<double> asymmetry_parameter; // altitude
+};
+
+class RadiativeTransferResult
+{
+	public:
+		int Ntheta;
+		int Nphi;
+		int Nmode;
+
+		std::vector<double> theta_e, theta_i, phi;
+
+		std::vector<double> altitude; // altitude
+		std::vector<double> altitude_top; // altitude
+		std::vector<double> altitude_bottom; // altitude
+		std::vector<double> physical_thickness; // altitude
+
+		std::vector<double> temperature; // altitude
+		std::vector<double> pressure; // altitude
+		std::vector<double> number_density; // altitude
+
+		std::vector<MonochromeData> spectral_data;
+
+		void exportResultNetCDF(std::string);
+};
+
+class RadiativeTransferCalculator
+{
+	private:
+		Geometry geometry_;
+
+		// void initializeLayer_(Layer&);
+		// void initializeSurface_(Layer&);
+		// void setLayerCondition_(AtmosphereModel&, double);
+		// std::vector<std::vector<Eigen::MatrixXd>> computeFourierSeriesCoefficients_(const std::vector<std::vector<std::vector<double>>>&, int);
+		// std::vector<std::vector<std::vector<double>>> reconstruct_(const std::vector<std::vector<std::vector<std::vector<double>>>>&);
+		// void computeFourierSeriesCoefficients_(Layer&);
+		// void reconstructOpticalProperties_(Layer&);
+		// void initializeGeometry_(void);
+		// void computeAtmosphericProperties_(AtmosphereModel&);
+		// void computeSpeciesProperties_(AtmosphereModel&);
+		// void validateAtmosphererModel_(const AtmosphereModel&);
+
+	public:
+		RadiativeTransferCalculator(const Geometry&);
+		RadiativeTransferResult computeMonochrome(const AtmosphereModel&, double, SpectralCoordinateDimenstion);
+};
+
+class ModelBuilder
+{
+	public:
+		static AtmosphereModel buildAtmosphereModel(const Configuration&);
+		static Geometry buildGeometry(const Configuration&);
+
+	private:
+		static std::vector<Species> buildSpecies_(const Configuration&, const AtmosphereModel&);
+		static double interpolateVerticalProfile(double, const std::vector<std::vector<double>>&, VerticalProfileInterpolation);
+};
+
+/*
 class RadiativeTransfer
 {
 	private:
@@ -753,64 +943,7 @@ class RadiativeTransfer
 		void exportResultNetCDF(std::string);
 		void exportResultNetCDF(void);
 };
-
-class CalculationLogger
-{
-	public:
-		class LayerRecord
-		{
-			public:
-				std::size_t idx;
-				double z_bot, z_top;        // m
-				double tau, omega;          // 無次元
-				double T;                   // K
-				double P;                   // Pa
-				double n;                   // m^-3
-				double dt_ms;               // ms その層の計算時間
-
-				int n_tot;
-				int n_now;
-
-				bool is_finished = false;
-
-				bool has_E = false; 
-		};
-
-		std::vector<double> zenith_angle = {0.0, 15.0, 30.0, 45.0, 60.0, 75.0};
-		std::vector<double> zenith_angle_rad = {0.0 * PI / 180.0, 15.0 * PI / 180.0, 30.0 * PI / 180.0, 45.0 * PI / 180.0, 60.0 * PI / 180.0, 75.0 * PI / 180.0};
-
-		class SimHeader
-		{
-			public:
-				std::string name;
-				std::size_t n_dirs;
-				std::size_t n_layers;
-				std::size_t n_atm_layers;      // 例: 2
-
-				std::size_t n_theta;
-				std::size_t n_phi;
-				std::size_t n_mode;
-		};
-
-		std::vector<LayerRecord> layer_record;
-		LayerRecord surface_record;
-		LayerRecord result_record;
-		bool enableSurface = false;
-		bool enableThenalEmission = false;
-		bool is_finished = false;
-		SimHeader header;
-
-		std::vector<double> r_bond, tdif_bond, tdir_bond, e;
-		std::vector<std::vector<double>> r, tdif, tdir;
-
-		std::string makeSimHeader(void);
-		void initialize(void);
-		std::string makeLayerTable(void);
-		std::string drawProgress(void);
-		void setLayerParameters(Layer&, int);
-		void printLog(std::string);
-		std::string makeDirectionalSummary(void);
-};
+*/
 
 class JacobianResult
 {
