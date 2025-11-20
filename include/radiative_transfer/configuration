@@ -537,19 +537,47 @@ inline Configuration::Atmosphere ConfigurationLoader::loadAtmosphere_(const std:
 
 			// ここまで粒径分布関数
 
-			s.refractive_index_spectrum_type = parseEnum_(getOptionalString_(kv, base + "refractive_index.spectrum.type"), map_refractive_index_spectrum_type);
-			
-			s.nr = getOptionalDouble_(kv, base + "refractive_index.spectrum.value.0");
-			s.ni = getOptionalDouble_(kv, base + "refractive_index.spectrum.value.1");
+			// ここから複素屈折率
+			// 読み込みの例
+			// refractive_index:
+			//   type: constant
+			//   value: [1.5014, 1.0E-3]
 
-			s.filename_refractive_index = getOptionalString_(kv, base + "refractive_index.spectrum.file");
-			s.unit_input_refractive_index_spectral = getOptionalString_(kv, base + "refractive_index.spectrum.unit");
+			// refractive_index:
+			//   type: spectral
+			//   unit: m-1
+			//   file: filename
 
-			s.refractive_index_vertical_profile_type = parseEnum_(getOptionalString_(kv, base + "refractive_index.vertical_profile.type"), map_refractive_index_vertical_profile_type);
-			s.unit_refractive_index_vertical_profile = getOptionalString_(kv, base + "refractive_index.vertical_profile.unit");
-			s.refractive_index_vertical_profile_interpolation  = parseEnum_(getOptionalString_(kv, base + "refractive_index.vertical_profile.interpolation"), map_vertical_profile_interpolation);
-			int n_vert = countArrayEntries_(kv, base + "refractive_index.vertical_profile.table");
-			if(hasKey_(kv, base + "refractive_index.vertical_profile.table.0.2") == false)
+			// refractive_index:
+			//   type: vertical
+			//   interpolation: linear
+			//   unit: km
+			//   table:
+			//     - [0.0, 1.5, 1.0E-3]
+			//     - [20.0, 1.5, 1.0E-3]
+			//     - [100.0, 1.5, 1.0E-3]
+
+			// refractive_index:
+			//   type: spectral_vertical
+			//   interpolation: linear
+			//   unit: [km, m-1]
+			//   file: filename
+
+			s.refractive_index_type = parseEnum_(getOptionalString_(kv, base + "refractive_index.type"), map_refractive_index_type);
+
+			// constant用
+			s.nr = getOptionalDouble_(kv, base + "refractive_index.value.0");
+			s.ni = getOptionalDouble_(kv, base + "refractive_index.value.1");
+
+			// spectral用
+			s.filename_refractive_index_spectral = getOptionalString_(kv, base + "refractive_index.file");
+			s.unit_input_refractive_index_spectral = getOptionalString_(kv, base + "refractive_index.unit");
+
+			// vertical用
+			s.refractive_index_vertical_profile_interpolation  = parseEnum_(getOptionalString_(kv, base + "refractive_index.interpolation"), map_vertical_profile_interpolation);
+
+			s.unit_refractive_index_vertical_profile = getOptionalString_(kv, base + "refractive_index.unit");
+			if(hasKey_(kv, base + "refractive_index.table.0.2") == false)
 			{
 				s.is_refractive_index_same_layering_atmosphere = true;
 			}
@@ -557,20 +585,24 @@ inline Configuration::Atmosphere ConfigurationLoader::loadAtmosphere_(const std:
 			{
 				if(s.is_refractive_index_same_layering_atmosphere)
 				{
-					double nr = getRequiredDouble_(kv, base + "refractive_index.vertical_profile.table." + std::to_string(j) + ".0");
-					double ni = getRequiredDouble_(kv, base + "refractive_index.vertical_profile.table." + std::to_string(j) + ".1");
+					double nr = getRequiredDouble_(kv, base + "refractive_index.table." + std::to_string(j) + ".0");
+					double ni = getRequiredDouble_(kv, base + "refractive_index.table." + std::to_string(j) + ".1");
 					
 					s.refractive_index_vertical_profile.push_back({nr, ni});
 				}
 				else
 				{
-					double alt = getRequiredDouble_(kv, base + "refractive_index.vertical_profile.table." + std::to_string(j) + ".0");
-					double nr = getRequiredDouble_(kv, base + "refractive_index.vertical_profile.table." + std::to_string(j) + ".1");
-					double ni = getRequiredDouble_(kv, base + "refractive_index.vertical_profile.table." + std::to_string(j) + ".2");
+					double alt = getRequiredDouble_(kv, base + "refractive_index.table." + std::to_string(j) + ".0");
+					double nr = getRequiredDouble_(kv, base + "refractive_index.table." + std::to_string(j) + ".1");
+					double ni = getRequiredDouble_(kv, base + "refractive_index.table." + std::to_string(j) + ".2");
 					
 					s.refractive_index_vertical_profile.push_back({alt, nr, ni});
 				}
 			}
+
+			// spectral_vertical用
+			s.filename_refractive_index_spectral_vertical = getOptionalString_(kv, base + "refractive_index.file");
+			s.unit_refractive_index_spectral_vertical = {getOptionalString_(kv, base + "refractive_index.unit.0"), getOptionalString_(kv, base + "refractive_index.unit.1")};
 
 			atmosphere.species_configuration.push_back(s);
 		}
@@ -1661,10 +1693,19 @@ inline void Configuration::validateConfiguration(void)
 					}
 					else if(atmosphere.species_configuration[i].isotopologue_type.value() == IsotopologueType::Defined)
 					{
-						// 重複のチェックは？
 						if(atmosphere.species_configuration[i].local_isotopologue_id.empty())
 						{
 							throw std::runtime_error("[Configuration::validateConfiguration] local_isotopologue_id for species " + std::to_string(i) + " was not specified.");
+						}
+
+						std::vector<int> check_ids = atmosphere.species_configuration[i].local_isotopologue_id;
+						std::sort(check_ids.begin(), check_ids.end());
+						
+						auto it = std::adjacent_find(check_ids.begin(), check_ids.end());
+
+						if(it != check_ids.end())
+						{
+							throw std::runtime_error("[Configuration::validateConfiguration] Duplicate local_isotopologue_id (" + std::to_string(*it) + ") found for species " + std::to_string(i) + ".");
 						}
 					}
 					else if(atmosphere.species_configuration[i].isotopologue_type.value() == IsotopologueType::All)
@@ -2197,33 +2238,40 @@ inline void Configuration::validateConfiguration(void)
 					}
 				}
 
-				// refractive index spectrum
-				if(!atmosphere.species_configuration[i].refractive_index_spectrum_type.has_value())
+
+				// 高度・波長依存性
+				if(!atmosphere.species_configuration[i].refractive_index_type.has_value())
 				{
 					throw std::runtime_error("[Configuration::validateConfiguration] refractive_index_type for species "+ std::to_string(i) + " was not specified.");
 				}
-				else if(atmosphere.species_configuration[i].refractive_index_spectrum_type.value() == RefractiveIndexSpectrumType::Constant)
+				else if(atmosphere.species_configuration[i].refractive_index_type.value() == RefractiveIndexType::Constant)
 				{
 					if(!atmosphere.species_configuration[i].nr.has_value() || !atmosphere.species_configuration[i].ni.has_value())
 					{
 						throw std::runtime_error("[Configuration::validateConfiguration] refractive_index value for species "+ std::to_string(i) + " was not specified.");
 					}
 				}
-				else if(atmosphere.species_configuration[i].refractive_index_spectrum_type.value() == RefractiveIndexSpectrumType::External)
+				else if(atmosphere.species_configuration[i].refractive_index_type.value() == RefractiveIndexType::Spectral)
 				{
-					if(!atmosphere.species_configuration[i].filename_refractive_index)
+					atmosphere.species_configuration[i].filename_refractive_index_spectral_vertical.reset();
+
+					if(!atmosphere.species_configuration[i].filename_refractive_index_spectral.has_value())
 					{
-						throw std::runtime_error("[Configuration::validateConfiguration] refractive_index spectrum file for species "+ std::to_string(i) + " was not specified.");
+						throw std::runtime_error("[Configuration::validateConfiguration] filename_refractive_index_spectral value for species "+ std::to_string(i) + " was not specified.");
+					}
+					if(!atmosphere.species_configuration[i].unit_input_refractive_index_spectral.has_value())
+					{
+						atmosphere.species_configuration[i].unit_input_refractive_index_spectral = spectral_coordinate.unit.value();
+						std::cout << "[Configuration::validateConfiguration] unit_input_refractive_index_spectral for species " << i << " was not specified. Automatically set to " << spectral_coordinate.unit.value() << "." << std::endl;
 					}
 				}
-				
-				// refractive index vertical profile
-				if(!atmosphere.species_configuration[i].refractive_index_vertical_profile_type.has_value())
+				else if(atmosphere.species_configuration[i].refractive_index_type.value() == RefractiveIndexType::Vertical)
 				{
-					atmosphere.species_configuration[i].refractive_index_vertical_profile_type = RefractiveIndexVerticalProfile::Constant;
-				}
-				if(atmosphere.species_configuration[i].refractive_index_vertical_profile_type.value() == RefractiveIndexVerticalProfile::Table)
-				{
+					if(s_config.refractive_index_vertical_profile.empty())
+					{
+						throw std::runtime_error("[Configuration::validateConfiguration] Vertical refractive index profile table for species " + std::to_string(i) + " is empty.");
+					}
+					
 					if(atmosphere.species_configuration[i].is_refractive_index_same_layering_atmosphere == true)
 					{
 						if(!atmosphere.z_center.empty())
@@ -2254,6 +2302,21 @@ inline void Configuration::validateConfiguration(void)
 							atmosphere.species_configuration[i].unit_refractive_index_vertical_profile = atmosphere.z_unit.value();
 							std::cout << "[Configuration::validateConfiguration] z unit of refractive index vertica profile for species " + std::to_string(i) + " was not specified. Automatically set to " << atmosphere.z_unit.value() << "." << std::endl;
 						}
+					}
+				}
+				else if(atmosphere.species_configuration[i].refractive_index_type.value() == RefractiveIndexType::SpectralVertical)
+				{
+					atmosphere.species_configuration[i].filename_refractive_index_spectral.reset();
+
+					if(!atmosphere.species_configuration[i].unit_refractive_index_spectral_vertical.has_value())
+					{
+						atmosphere.species_configuration[i].unit_refractive_index_spectral_vertical = {atmosphere.z_unit.value(), spectral_coordinate.unit.value()};
+						std::cout << "[Configuration::validateConfiguration] Unit of refractive index input file for species " + std::to_string(i) + " was not specified. Automatically set to (" << atmosphere.z_unit.value() <<", " << spectral_coordinate.unit.value() << ")." << std::endl;
+					}
+					
+					if(!atmosphere.species_configuration[i].filename_refractive_index_spectral_vertical.has_value())
+					{
+						throw std::runtime_error("[Configuration::validateConfiguration] filename_refractive_index_spectral_vertical value for species "+ std::to_string(i) + " was not specified.");
 					}
 				}
 			}

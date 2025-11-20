@@ -9,6 +9,7 @@
 #include<string>
 #include<algorithm>
 #include<stdexcept>
+#include<limits>
 
 #include<Eigen/Dense>
 #include<omp.h>
@@ -88,7 +89,7 @@ double ModelBuilder::interpolateVerticalProfile(double x, const std::vector<std:
 	}
 }
 
-std::vector<Species> ModelBuilder::buildSpecies_(const Configuration& configuration, const AtmosphereModel& atmosphere_model)
+std::vector<Species> ModelBuilder::buildSpecies_(const Configuration& configuration, const AtmosphereModel& atmosphere_model, const SpectralInformation& spectral)
 {
 	int n_species = configuration.atmosphere.species_configuration.size();
 	int n_layers = atmosphere_model.altitude.size();
@@ -208,26 +209,324 @@ std::vector<Species> ModelBuilder::buildSpecies_(const Configuration& configurat
 
 			if(s.scatter_type == ScatterType::Mie)
 			{
-				// 粒径分布関数や積分の重み関数もここで実装
-				// s.particle_size_distribution, s.weight_paritcle_size_distribution
-				// 複素屈折率をどうするか
+				s.refractive_index.resize(n_layers);
 
-				if(s_input.refractive_index_spectrum_type.value() == RefractiveIndexSpectrumType::Constant)
+				if(s_input.refractive_index_type.value() == RefractiveIndexType::Constant)
 				{
-					;
+					for(int j = 0; j < n_layers; ++j)
+					{
+						s.refractive_index[j] = {{std::numeric_limits<double>::quiet_NaN(), s_input.nr.value(), s_input.ni.value()}};
+					}
 				}
-				else if(s_input.refractive_index_spectrum_type.value() == RefractiveIndexSpectrumType::External)
+				else if(s_input.refractive_index_type.value() == RefractiveIndexType::Spectrum)
 				{
-					;
-				}
+					// 外部ファイル読み込み
+					// 読み込んだ配列 std::vector<std::vector<double>> loaded_data ({spectral, nr, ni}の配列)
+					std::vector<std::vector<double>> loaded_data = loadSpectralFile(s_input.filename_refractive_index_spectral.value());
+					
+					SpectralCoordinateDimension input_dim;
+					if(getUnitInfo(s_input.unit_input_refractive_index_spectral.value()).dim == UnitDim::Length)
+					{
+						input_dim = SpectralCoordinateDimension::Wavelength;
+					}
+					else if(getUnitInfo(s_input.unit_input_refractive_index_spectral.value()).dim == UnitDim::Wavenumber)
+					{
+						input_dim = SpectralCoordinateDimension::Wavenumber;
+					}
 
-				if(s_input.refractive_index_vertical_profile_type.value() == RefractiveIndexSpectrumVerticalProfile::Constnat)
-				{
-					;
+					//ファイルのスペクトル次元と計算スペクトル次元が異なる場合
+					if(spectral.dimension != input_dim)
+					{
+						if(spectral.dimension == SpectralCoordinateDimension::Wavelength) // 計算は波長だが入力ファイルは波数の場合
+						{
+							double scale = scaleUnit(s_input.unit_input_refractive_index_spectral.value(), "m-1");
+							// 読み込んだスペクトルの逆数を取る
+							for(int j = 0; j < loaded_data.size(); ++j)
+							{
+								loaded_data[j][0] = 1.0 / (loaded_data[j][0] * scale);
+							}
+						}
+						else if(spectral.dimension == SpectralCoordinateDimension::Wavenumber) // 計算は波数だが入力ファイルは波長の場合
+						{
+							double scale = scaleUnit(s_input.unit_input_refractive_index_spectral.value(), "m");
+							// 読み込んだスペクトルの逆数を取る
+							for(int j = 0; j < loaded_data.size(); ++j)
+							{
+								loaded_data[j][0] = 1.0 / (loaded_data[j][0] * scale);
+							}
+						}
+					}
+					else
+					{
+						if(spectral.dimension == SpectralCoordinateDimension::Wavelength) // 計算も入力ファイルは波長の場合
+						{
+							double scale = scaleUnit(s_input.unit_input_refractive_index_spectral.value(), "m");
+							
+							for(int j = 0; j < loaded_data.size(); ++j)
+							{
+								loaded_data[j][0] = loaded_data[j][0] * scale;
+							}
+						}
+						else if(spectral.dimension == SpectralCoordinateDimension::Wavenumber) // 計算も入力ファイルは波数の場合
+						{
+							double scale = scaleUnit(s_input.unit_input_refractive_index_spectral.value(), "m-1");
+							
+							for(int j = 0; j < loaded_data.size(); ++j)
+							{
+								loaded_data[j][0] = loaded_data[j][0] * scale;
+							}
+						}
+					}
+
+					std::sort(loaded_data.begin(), loaded_data.end(), [](const std::vector<double>& a, const std::vector<double>& b){return a[0] < b[0];});
+
+					for(int j = 0; j < n_layers; ++j)
+					{
+						s.refractive_index[j].resize(loaded_data.size());
+
+						for(int k = 0; k < loaded_data.size(); ++k)
+						{
+							s.refractive_index[j][k] = {loaded_data[k][0], loaded_data[k][1], loaded_data[k][2]};
+						}
+					}
 				}
-				else if(s_input.refractive_index_vertical_profile_type.value() == RefractiveIndexSpectrumVerticalProfile::Table)
+				else if(s_input.refractive_index_type.value() == RefractiveIndexType::Vertical)
 				{
-					;
+					if(s_input.is_refractive_index_same_layering_atmosphere == true)
+					{
+						for(int j = 0; j < n_layers; ++j)
+						{
+							s.refractive_index[j] = {{std::numeric_limits<double>::quiet_NaN(), s_input.refractive_index_vertical_profile[j][0], s_input.refractive_index_vertical_profile[j][1]}};
+						}
+					}
+					else
+					{
+						std::vector<std::vector<double>> nr_input(s_input.refractive_index_vertical_profile.size(), std::vector<double>(2, 0.0));
+						std::vector<std::vector<double>> ni_input(s_input.refractive_index_vertical_profile.size(), std::vector<double>(2, 0.0));
+
+						for(int j = 0; j < s_input.refractive_index_vertical_profile.size(); ++j)
+						{
+							nr_input[j] = {s_input.refractive_index_vertical_profile[j][0] * scaleUnit(s_input.unit_refractive_index_vertical_profile.value(), "m"), s_input.refractive_index_vertical_profile[j][1]};
+							ni_input[j] = {s_input.refractive_index_vertical_profile[j][0] * scaleUnit(s_input.unit_refractive_index_vertical_profile.value(), "m"), s_input.refractive_index_vertical_profile[j][2]};
+						}
+
+						auto itp = s_input.refractive_index_vertical_profile_interpolation.value();
+
+						for(int j = 0; j < n_layers; ++j)
+						{
+							double alt = atmosphere_model.altitude[j];
+							s.refractive_index[j] = {{std::numeric_limits<double>::quiet_NaN(), interpolateVerticalProfile(alt, nr_input, itp), interpolateVerticalProfile(alt, ni_input, itp)}};
+						}
+					}
+				}
+				else if(s_input.refractive_index_type.value() == RefractiveIndexType::SpectralVertical)
+				{
+					// 外部ファイル読み込み
+					// 読み込んだ配列 std::vector<std::vector<std::vector<double>>> loaded_data ({altitude, spectral, nr, ni}の配列)
+					// loaded_data[n_alt][n_spec] = {alt, spec, nr, ni}
+					std::vector<std::vector<std::vector<double>>> loaded_data = loadSpectralVerticalFile(s_input.filename_refractive_index_spectral_vertical.value());
+					std::string unit_alt_input = s_input.unit_refractive_index_spectral_vertical[0].value();
+					std::string unit_spec_input = s_input.unit_refractive_index_spectral_vertical[1].value();
+
+					SpectralCoordinateDimension input_dim;
+					if(getUnitInfo(unit_spec_input).dim == UnitDim::Length)
+					{
+						input_dim = SpectralCoordinateDimension::Wavelength;
+					}
+					else if(getUnitInfo(unit_spec_input).dim == UnitDim::Wavenumber)
+					{
+						input_dim = SpectralCoordinateDimension::Wavenumber;
+					}
+
+					//ファイルのスペクトル次元と計算スペクトル次元が異なる場合
+					if(spectral.dimension != input_dim)
+					{
+						if(spectral.dimension == SpectralCoordinateDimension::Wavelength) // 計算は波長だが入力ファイルは波数の場合
+						{
+							double scale = scaleUnit(unit_spec_input, "m-1");
+							// 読み込んだスペクトルの逆数を取る
+							for(int j = 0; j < loaded_data.size(); ++j)
+							{
+								for(int k = 0; k < loaded_data[j].size(); ++k)
+								{
+									loaded_data[j][k][1] = 1.0 / (loaded_data[j][k][1] * scale);
+								}
+
+								std::sort(loaded_data[j].begin(), loaded_data[j].end(), [](const std::vector<double>& a, const std::vector<double>& b){return a[1] < b[1];});
+							}
+						}
+						else if(spectral.dimension == SpectralCoordinateDimension::Wavenumber) // 計算は波数だが入力ファイルは波長の場合
+						{
+							double scale = scaleUnit(unit_spec_input, "m");
+							// 読み込んだスペクトルの逆数を取る
+							for(int j = 0; j < loaded_data.size(); ++j)
+							{
+								for(int k = 0; k < loaded_data[j].size(); ++k)
+								{
+									loaded_data[j][k][1] = 1.0 / (loaded_data[j][k][1] * scale);
+								}
+
+								std::sort(loaded_data[j].begin(), loaded_data[j].end(), [](const std::vector<double>& a, const std::vector<double>& b){return a[1] < b[1];});
+							}
+						}
+					}
+					else
+					{
+						if(spectral.dimension == SpectralCoordinateDimension::Wavelength) // 計算も入力ファイルは波長の場合
+						{
+							double scale = scaleUnit(unit_spec_input, "m");
+							// 読み込んだスペクトルの逆数を取る
+							for(int j = 0; j < loaded_data.size(); ++j)
+							{
+								for(int k = 0; k < loaded_data[j].size(); ++k)
+								{
+									loaded_data[j][k][1] = loaded_data[j][k][1] * scale;
+								}
+
+								std::sort(loaded_data[j].begin(), loaded_data[j].end(), [](const std::vector<double>& a, const std::vector<double>& b){return a[1] < b[1];});
+							}
+						}
+						else if(spectral.dimension == SpectralCoordinateDimension::Wavenumber) // 計算も入力ファイルは波数の場合
+						{
+							double scale = scaleUnit(unit_spec_input, "m-1");
+							// 読み込んだスペクトルの逆数を取る
+							for(int j = 0; j < loaded_data.size(); ++j)
+							{
+								for(int k = 0; k < loaded_data[j].size(); ++k)
+								{
+									loaded_data[j][k][1] = loaded_data[j][k][1] * scale;
+								}
+
+								std::sort(loaded_data[j].begin(), loaded_data[j].end(), [](const std::vector<double>& a, const std::vector<double>& b){return a[1] < b[1];});
+							}
+						}
+					}
+					
+					// 入力データを高度順にソート (補間のため必須)
+					std::sort(loaded_data.begin(), loaded_data.end(), [](const std::vector<std::vector<double>>& a, const std::vector<std::vector<double>>& b){return a[0][0] < b[0][0];});
+
+					// 入力データの高度リストを作成（検索用）
+					std::vector<double> input_alts(loaded_data.size());
+					for(const auto& layer : loaded_data)
+					{
+						input_alts.push_back(layer[0][0]);
+					}
+
+					s.refractive_index.resize(n_layers);
+					auto itp_method = s_input.refractive_index_vertical_profile_interpolation.value();
+
+					// 各計算レイヤーに対して
+					for(int j = 0; j < n_layers; ++j)
+					{
+						double target_alt = atmosphere_model.altitude[j];
+
+						// 補間を行う2つの入力層を探す (lower_bound)
+						// it は target_alt 以上の最初の要素を指す
+						auto it = std::lower_bound(input_alts.begin(), input_alts.end(), target_alt);
+
+						// 補間結果を格納するベクタを準備
+						// (サイズは入力データのスペクトル数と同じと仮定)
+						size_t n_spec = loaded_data[0].size();
+						s.refractive_index[j].resize(n_spec);
+
+						if (it == input_alts.begin()) 
+						{
+							// 範囲外(下): 一番下の層をコピー
+							const auto& src = loaded_data.front();
+
+							for(size_t k=0; k<n_spec; ++k)
+							{
+								s.refractive_index[j][k] = {src[k][1], src[k][2], src[k][3]};
+							}
+						}
+						else if (it == input_alts.end()) 
+						{
+							// 範囲外(上): 一番上の層をコピー
+							const auto& src = loaded_data.back();
+
+							for(size_t k=0; k<n_spec; ++k)
+							{
+								s.refractive_index[j][k] = {src[k][1], src[k][2], src[k][3]};
+							}
+						}
+						else
+						{
+							// 範囲内
+							size_t idx_upper = std::distance(input_alts.begin(), it);
+							size_t idx_lower = idx_upper - 1;
+
+							double z0 = input_alts[idx_lower];
+							double z1 = input_alts[idx_upper];
+							
+							// 線形補間係数
+							double factor = (target_alt - z0) / (z1 - z0);
+
+							// ★ここが最適化ポイント★
+							// 「波長ごとのループ」の中で「高度探索」をするのではなく、
+							// 「決まった2つの高度層」に対して「全波長を一気に計算」する。
+							
+							const auto& layer0 = loaded_data[idx_lower];
+							const auto& layer1 = loaded_data[idx_upper];
+
+							// ---------------------------------------------------
+							// 補間方法による分岐 (ループの外で判定)
+							// ---------------------------------------------------
+							if (itp_method == VerticalProfileInterpolation::Linear)
+							{
+								// --- 線形補間 (Linear) ---
+								// y = y0 + factor * (y1 - y0)
+								for(size_t k = 0; k < n_spec; ++k)
+								{
+									double wl = layer0[k][1];
+									double nr = layer0[k][2] + factor * (layer1[k][2] - layer0[k][2]);
+									double ni = layer0[k][3] + factor * (layer1[k][3] - layer0[k][3]);
+
+									s.refractive_index[j][k] = {wl, nr, ni};
+								}
+							}
+							else
+							{
+								// --- 対数線形補間 (Exponential / Log-Linear) ---
+								// ln(y) = ln(y0) + factor * (ln(y1) - ln(y0))
+								// y = exp( ... )
+								
+								for(size_t k = 0; k < n_spec; ++k)
+								{
+									double wl = layer0[k][1];
+									double nr, ni;
+
+									// 実部 (Nr) の補間
+									double nr0 = layer0[k][2];
+									double nr1 = layer1[k][2];
+									
+									// 安全策: 値が正でなければ対数が取れないため、線形にフォールバック
+									if (nr0 <= 1.0e-50 || nr1 <= 1.0e-50)
+									{
+										nr = nr0 + factor * (nr1 - nr0);
+									}
+									else
+									{
+										nr = std::exp(std::log(nr0) + factor * (std::log(nr1) - std::log(nr0)));
+									}
+
+									// 虚部 (Ni) の補間
+									double ni0 = layer0[k][3];
+									double ni1 = layer1[k][3];
+
+									if (ni0 <= 1.0e-50 || ni1 <= 1.0e-50)
+									{
+										ni = ni0 + factor * (ni1 - ni0);
+									}
+									else
+									{
+										ni = std::exp(std::log(ni0) + factor * (std::log(ni1) - std::log(ni0)));
+									}
+
+									s.refractive_index[j][k] = {wl, nr, ni};
+								}
+							}
+						}
+					}
 				}
 
 				if(s_input.size_distribution.value() == ParticleSizeDistribution::Delta)
@@ -277,17 +576,16 @@ std::vector<Species> ModelBuilder::buildSpecies_(const Configuration& configurat
 			netCDF::NcFile nc_hitran(configuration.filename_hitran.value(), netCDF::NcFile::read);
 
 			double wavenumber_max_calc, wavenumber_min_calc;
-			// スペクトルグリッドが先に決まらないと読み出すラインが決まらない
-			// そのためには装置関数などを先に読み出す必要がある
-			// 大気モデルの構築よりスペクトルグリッドの構築が先にあるべき
 
-			if(configuration.spectral_coordinate.spectral_coordinate_dimension.value() == SpectralCoordinateDimenstion::Wavenumber)
+			if(spectral.spectral_dimension == SpectralCoordinateDimension::Wavelength)
 			{
-				;
+				wavenumber_max_calc = 1.0 / spectral.spectral_grid[0];
+				wavenumber_min_calc = 1.0 / spectral.spectral_grid[spectral.spectral_grid.size() - 1];
 			}
-			else if(configuration.spectral_coordinate.spectral_coordinate_dimension.value() == SpectralCoordinateDimenstion::Wavelength)
+			else if(spectral.spectral_dimension == SpectralCoordinateDimension::Wavenumber)
 			{
-				;
+				wavenumber_max_calc = spectral.spectral_grid[spectral_grid.size() - 1];
+				wavenumber_min_calc = spectral.spectral_grid[0];
 			}
 
 			double wavenumber_min = std::max(0.0, wavenumber_min_calc - 1000.0 * scaleUnit("cm-1", "m-1"));
@@ -314,22 +612,34 @@ std::vector<Species> ModelBuilder::buildSpecies_(const Configuration& configurat
 					}
 				}
 
-				double norm_const = 0.0;
-
 				if(s_input.is_normalize.value() == true)
 				{
-					norm_const += isos[j].abundance;
-				}
+					double norm_const = 0.0;
 
-				for(int j = 0; j < isos.size(); ++j)
-				{
-					isos[j].abundance /= norm_const;
+					for(const auto& iso : isos)
+					{
+						norm_const += iso.abundance;
+					}
+					
+					if(norm_const > 0.0)
+					{
+						for(auto& iso : isos)
+						{
+							iso.abundance /= norm_const;
+						}
+					}
 				}
 
 				for(int j = 0; j < isos.size(); ++j)
 				{
 					Species ss = s;
 					ss.isotopologue = isos[j];
+
+					for(int k = 0; k < ss.vertical_mixing_ratio_profile.size(); ++k)
+					{
+						ss.vertical_mixing_ratio_profile[k] *= isos[j].abundance;
+						ss.vertical_number_density_profile[k] *= isos[j].abundance;
+					}
 
 					ss.lines = hitran::loadLines(nc_hitran, ss.isotopologue, wavenumber_min, wavenumber_max, false);
 
@@ -361,22 +671,34 @@ std::vector<Species> ModelBuilder::buildSpecies_(const Configuration& configurat
 					}
 				}
 
-				double norm_const = 0.0;
-
 				if(s_input.is_normalize.value() == true)
 				{
-					norm_const += isos[j].abundance;
-				}
+					double norm_const = 0.0;
 
-				for(int j = 0; j < isos.size(); ++j)
-				{
-					isos[j].abundance /= norm_const;
+					for(const auto& iso : isos)
+					{
+						norm_const += iso.abundance;
+					}
+					
+					if(norm_const > 0.0)
+					{
+						for(auto& iso : isos)
+						{
+							iso.abundance /= norm_const;
+						}
+					}
 				}
 
 				for(int j = 0; j < isos.size(); ++j)
 				{
 					Species ss = s;
 					ss.isotopologue = isos[j];
+
+					for(int k = 0; k < ss.vertical_mixing_ratio_profile.size(); ++k)
+					{
+						ss.vertical_mixing_ratio_profile[k] *= isos[j].abundance;
+						ss.vertical_number_density_profile[k] *= isos[j].abundance;
+					}
 
 					ss.lines = hitran::loadLines(nc_hitran, ss.isotopologue, wavenumber_min, wavenumber_max, false);
 

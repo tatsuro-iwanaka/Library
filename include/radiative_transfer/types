@@ -95,19 +95,36 @@ const inline std::map<std::string, CrossSectionType> map_cross_section_type =
 	{"HITRAN", CrossSectionType::HITRAN}
 };
 
-enum class RefractiveIndexSpectrumType{Constant, External};
-const inline std::map<std::string, RefractiveIndexSpectrumType> map_refractive_index_spectrum_type =
+enum class RefractiveIndexType{Constant, Spectral, Vertical, SpectralVertical};
+const inline std::map<std::string, RefractiveIndexType> map_refractive_index_type =
 {
-	{"CONSTANT",  RefractiveIndexSpectrumType::Constant},
-	{"EXTERNAL", RefractiveIndexSpectrumType::External}
+	{"CONSTANT", RefractiveIndexType::Constant},
+	{"SPECTRAL", RefractiveIndexType::Spectral},
+	{"VERTICAL", RefractiveIndexType::Vertical},
+	{"SPECTRALVERTICAL", RefractiveIndexType::SpectralVertical},
+	{"SPECTRAL_VERTICAL", RefractiveIndexType::SpectralVertical},
+	{"VERTICALSPECTRAL", RefractiveIndexType::SpectralVertical},
+	{"VERTICAL_SPECTRAL", RefractiveIndexType::SpectralVertical},
+	{"BOTH", RefractiveIndexType::SpectralVertical},
+	{"COUPLED", RefractiveIndexType::SpectralVertical},
+	{"COUPLED2D", RefractiveIndexType::SpectralVertical},
+	{"COUPLED_2D", RefractiveIndexType::SpectralVertical},
+	{"2D", RefractiveIndexType::SpectralVertical}
 };
 
-enum class RefractiveIndexVerticalProfile{Constant, Table};
-const inline std::map<std::string, RefractiveIndexVerticalProfile> map_refractive_index_vertical_profile_type =
-{
-	{"CONSTANT", RefractiveIndexVerticalProfile::Constant},
-	{"TABLE", RefractiveIndexVerticalProfile::Table}
-};
+// enum class RefractiveIndexSpectrumType{Constant, External};
+// const inline std::map<std::string, RefractiveIndexSpectrumType> map_refractive_index_spectrum_type =
+// {
+// 	{"CONSTANT",  RefractiveIndexSpectrumType::Constant},
+// 	{"EXTERNAL", RefractiveIndexSpectrumType::External}
+// };
+
+// enum class RefractiveIndexVerticalProfile{Constant, Table};
+// const inline std::map<std::string, RefractiveIndexVerticalProfile> map_refractive_index_vertical_profile_type =
+// {
+// 	{"CONSTANT", RefractiveIndexVerticalProfile::Constant},
+// 	{"TABLE", RefractiveIndexVerticalProfile::Table}
+// };
 
 enum class InCellSuperSamplingType{Enable, Disable};
 const inline std::map<std::string, InCellSuperSamplingType> map_in_cell_super_sampling_type =
@@ -256,11 +273,12 @@ struct Species
 
 		double g_factor;	//g-factor for Henyey-Greenstein function
 
-		double absorption_cross_section;	//m^2/molecule
-		double scattering_cross_section;	//m^2/molecule
+		// double absorption_cross_section;	//m^2/molecule
+		// double scattering_cross_section;	//m^2/molecule
 
-		std::vector<double> absorption_cross_section_spectrun;	// spectral, m^2/molecule
-		std::vector<double> scattering_cross_section_spectrun;	// spectral, m^2/molecule
+		std::vector<double> absorption_cross_section_spectrum; // spectral, m^2/molecule
+		std::vector<double> scattering_cross_section_spectrum; // spectral, m^2/molecule
+		std::vector<std::vector<std::vector<double>>> refrtactive_index; // altitude, spectral, nr, ni
 
 		std::vector<double> vertical_number_density_profile;	// m-3
 		std::vector<double> vertical_mixing_ratio_profile;	// mol/mol
@@ -607,25 +625,37 @@ class Configuration
 			std::optional<double> scattering_cross_section;	//m^2/molecule
 			std::optional<std::string> scattering_cross_section_unit;
 
+
+
 			// refractive index for mie scattering
-			std::optional<std::string> unit_input_refractive_index_spectral;
-			std::optional<RefractiveIndexSpectrumType> refractive_index_spectrum_type; // constant, external
-			std::optional<RefractiveIndexVerticalProfile> refractive_index_vertical_profile_type; // constant, table
+			std::optional<RefractiveIndexType> refractive_index_type; // constant, spectral, vertical, 2d
+			// constant用
 			std::optional<double> nr;	//real part of refractive index n = nr - i * ni
 			std::optional<double> ni;	//imaginary part of refractive index n = nr - i * ni
-			// 複素屈折率の高度分布
-			std::vector<std::vector<double>> refractive_index_vertical_profile; // m, nr, ni
+
+			// spectral用
+			std::optional<std::string> unit_input_refractive_index_spectral;
+			std::optional<std::string> filename_refractive_index_spectral;
+
+			// vertical用
 			bool is_refractive_index_same_layering_atmosphere = false;
 			std::optional<VerticalProfileInterpolation> refractive_index_vertical_profile_interpolation;
+
+			std::vector<std::vector<double>> refractive_index_vertical_profile; // altitude, spectral, nr, ni
 			std::optional<std::string> unit_refractive_index_vertical_profile;
 
-			// size distribution (Mie)
+			// spectral_vertical用
+			std::optional<std::string> filename_refractive_index_spectral_vertical;
+			std::vector<std::optional<std::string>> unit_refractive_index_spectral_vertical; // altitude, spectral
+
+
+
+			// 粒径分布関数 (Mie)
 			std::optional<ParticleSizeDistribution> size_distribution; // delta, log-normal, ...
 			std::optional<std::string> unit_input_radius;
 			std::optional<int> count_radius; // sampling
 
 			// Hovenier (2004)
-
 			// Delta
 			std::optional<double> delta_r; // m
 
@@ -656,7 +686,6 @@ class Configuration
 
 			std::optional<std::string> filename_scattering_cross_section;
 			std::optional<std::string> filename_absorption_cross_section;
-			std::optional<std::string> filename_refractive_index;
 
 			// for hitran
 			std::optional<int> molecule_id;
@@ -818,14 +847,24 @@ class RadiativeTransferCalculator
 		RadiativeTransferResult computeMonochrome(const AtmosphereModel&, double, SpectralCoordinateDimension);
 };
 
+struct SpectralInformation
+{
+	public:
+		std::vector<double> spectral_grid; // m or m-1
+		SpectralCoordinateDimension spectral_dimension; // wavelength or wavenumber
+
+		// instrumentの情報のことも格納
+}
+
 class ModelBuilder
 {
 	public:
 		static AtmosphereModel buildAtmosphereModel(const Configuration&);
 		static Geometry buildGeometry(const Configuration&);
+		static SpectralInformation buildSpectrum(const Configuration&);
 
 	private:
-		static std::vector<Species> buildSpecies_(const Configuration&, const AtmosphereModel&);
+		static std::vector<Species> buildSpecies_(const Configuration&, const AtmosphereModel&, const SpectralInformation&);
 		static double interpolateVerticalProfile(double, const std::vector<std::vector<double>>&, VerticalProfileInterpolation);
 };
 
