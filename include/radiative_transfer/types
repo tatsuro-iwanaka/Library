@@ -284,9 +284,9 @@ struct Species
 		std::vector<double> vertical_mixing_ratio_profile;	// mol/mol
 		std::vector<std::vector<double>> refractive_index_vertical_profile; // nr, ni
 
+		bool is_hitran;
 		hitran::Isotopologue isotopologue;
 		std::vector<hitran::Line> lines;
-		double abundance = 1.0;
 };
 
 struct OpticalLayer
@@ -614,17 +614,20 @@ class Configuration
 			std::optional<CrossSectionType> absorption_cross_section_type; // constant, external, hitran
 
 			// absorption cross section
+			std::optional<std::string> filename_absorption_cross_section;
 			std::optional<std::string> unit_input_absorption_cross_section;
 			std::optional<std::string> unit_input_absorption_spectral;
 			std::optional<double> absorption_cross_section;	//m^2/molecule
 			std::optional<std::string> absorption_cross_section_unit;
 
+
 			// scattering cross section
+			std::optional<std::string> filename_scattering_cross_section;
 			std::optional<std::string> unit_input_scattering_cross_section;
 			std::optional<std::string> unit_input_scattering_spectral;
 			std::optional<double> scattering_cross_section;	//m^2/molecule
 			std::optional<std::string> scattering_cross_section_unit;
-
+			
 
 
 			// refractive index for mie scattering
@@ -684,8 +687,7 @@ class Configuration
 			// for HG
 			std::optional<double> g_factor;	//g-factor for Henyey-Greenstein function
 
-			std::optional<std::string> filename_scattering_cross_section;
-			std::optional<std::string> filename_absorption_cross_section;
+
 
 			// for hitran
 			std::optional<int> molecule_id;
@@ -859,7 +861,7 @@ struct SpectralInformation
 class ModelBuilder
 {
 	public:
-		static AtmosphereModel buildAtmosphereModel(const Configuration&);
+		static AtmosphereModel buildAtmosphereModel(const Configuration&, const SpectralInformation&);
 		static Geometry buildGeometry(const Configuration&);
 		static SpectralInformation buildSpectrum(const Configuration&);
 

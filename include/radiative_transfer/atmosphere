@@ -12,7 +12,8 @@
 #include<limits>
 
 #include<Eigen/Dense>
-#include<omp.h>
+#include<netcdf>
+// #include<omp.h>
 
 #include"types"
 #include"constants"
@@ -28,6 +29,10 @@ std::vector<std::vector<std::vector<double>>> generateRectangularSizeDistributio
 std::vector<std::vector<std::vector<double>>> generateGammaSizeDistribution(int, double, double);
 std::vector<std::vector<std::vector<double>>> generateModifiedGammaSizeDistribution(int, double, double, double);
 std::vector<std::vector<std::vector<double>>> generatePowerLawSizeDistribution(int, double, double, double);
+
+std::vector<std::vector<double>> loadSpectralFile(std::string, std::string, std::string, std::string, std::string);
+std::vector<std::vector<double>> loadRefractiveIndexSpectralFile(std::string, std::string, std::string, std::string, std::string);
+std::vector<std::vector<std::vector<double>>> loadRefractiveIndexSpectralVerticalFile(std::string, std::string, std::string, std::string, std::string, std::string, std::string);
 
 double ModelBuilder::interpolateVerticalProfile(double x, const std::vector<std::vector<double>>& table, VerticalProfileInterpolation type)
 {
@@ -103,7 +108,7 @@ std::vector<Species> ModelBuilder::buildSpecies_(const Configuration& configurat
 		s.name = s_input.name.value();
 		s.species_state = s_input.species_state.value();
 
-		bool is_hitran = false;
+		s.is_hitran = false;
 
 		// 鉛直分布も忘れずに実装
 		s.vertical_number_density_profile.resize(n_layers);
@@ -177,7 +182,24 @@ std::vector<Species> ModelBuilder::buildSpecies_(const Configuration& configurat
 				else if(s_input.scattering_cross_section_type.value() == CrossSectionType::External)
 				{
 					// 外部ファイルを読み込み
-					;
+					// 読み込んだ配列 std::vector<std::vector<double>> loaded_data ({spectral, scattering_cross_section}の配列)
+					std::vector<std::vector<double>> loaded_data;
+
+					if(spectral.spectral_dimension == SpectralCoordinateDimension::Wavelength)
+					{
+						loaded_data = loadSpectralFile(s_input.filename_scattering_cross_section.value(), "wavelength", "scattering_cross_section", "m", "m2");
+					}
+					else if(spectral.spectral_dimension == SpectralCoordinateDimension::Wavenumber)
+					{
+						loaded_data = loadSpectralFile(s_input.filename_scattering_cross_section.value(), "wavenumber", "scattering_cross_section", "m-1", "m2");
+					}
+
+					s.scattering_cross_section_spectrum.resize(loaded_data.size(), 2);
+
+					for(int j = 0; j < loaded_data.size(); ++j)
+					{
+						s.scattering_cross_section_spectrum[j] = loaded_data;
+					}
 				}
 
 				if(s.scatter_type == ScatterType::HenyeyGreenstein)
@@ -195,11 +217,28 @@ std::vector<Species> ModelBuilder::buildSpecies_(const Configuration& configurat
 				else if(s_input.absorption_cross_section_type.value() == CrossSectionType::External)
 				{
 					// 外部ファイルを読み込み
-					;
+					// 読み込んだ配列 std::vector<std::vector<double>> loaded_data ({spectral, absorption_cross_section}の配列)
+					std::vector<std::vector<double>> loaded_data;
+
+					if(spectral.spectral_dimension == SpectralCoordinateDimension::Wavelength)
+					{
+						loaded_data = loadSpectralFile(s_input.filename_absorption_cross_section.value(), "wavelength", "absorption_cross_section", "m", "m2");
+					}
+					else if(spectral.spectral_dimension == SpectralCoordinateDimension::Wavenumber)
+					{
+						loaded_data = loadSpectralFile(s_input.filename_absorption_cross_section.value(), "wavenumber", "absorption_cross_section", "m-1", "m2");
+					}
+
+					s.absorption_cross_section_spectrum.resize(loaded_data.size(), 2);
+
+					for(int j = 0; j < loaded_data.size(); ++j)
+					{
+						s.absorption_cross_section_spectrum[j] = loaded_data;
+					}
 				}
 				else if(s_input.absorption_cross_section_type.value() == CrossSectionType::HITRAN)
 				{
-					is_hitran = true;
+					s.is_hitran = true;
 				}
 			}
 		}
@@ -222,72 +261,21 @@ std::vector<Species> ModelBuilder::buildSpecies_(const Configuration& configurat
 				{
 					// 外部ファイル読み込み
 					// 読み込んだ配列 std::vector<std::vector<double>> loaded_data ({spectral, nr, ni}の配列)
-					std::vector<std::vector<double>> loaded_data = loadSpectralFile(s_input.filename_refractive_index_spectral.value());
-					
-					SpectralCoordinateDimension input_dim;
-					if(getUnitInfo(s_input.unit_input_refractive_index_spectral.value()).dim == UnitDim::Length)
-					{
-						input_dim = SpectralCoordinateDimension::Wavelength;
-					}
-					else if(getUnitInfo(s_input.unit_input_refractive_index_spectral.value()).dim == UnitDim::Wavenumber)
-					{
-						input_dim = SpectralCoordinateDimension::Wavenumber;
-					}
 
-					//ファイルのスペクトル次元と計算スペクトル次元が異なる場合
-					if(spectral.dimension != input_dim)
-					{
-						if(spectral.dimension == SpectralCoordinateDimension::Wavelength) // 計算は波長だが入力ファイルは波数の場合
-						{
-							double scale = scaleUnit(s_input.unit_input_refractive_index_spectral.value(), "m-1");
-							// 読み込んだスペクトルの逆数を取る
-							for(int j = 0; j < loaded_data.size(); ++j)
-							{
-								loaded_data[j][0] = 1.0 / (loaded_data[j][0] * scale);
-							}
-						}
-						else if(spectral.dimension == SpectralCoordinateDimension::Wavenumber) // 計算は波数だが入力ファイルは波長の場合
-						{
-							double scale = scaleUnit(s_input.unit_input_refractive_index_spectral.value(), "m");
-							// 読み込んだスペクトルの逆数を取る
-							for(int j = 0; j < loaded_data.size(); ++j)
-							{
-								loaded_data[j][0] = 1.0 / (loaded_data[j][0] * scale);
-							}
-						}
-					}
-					else
-					{
-						if(spectral.dimension == SpectralCoordinateDimension::Wavelength) // 計算も入力ファイルは波長の場合
-						{
-							double scale = scaleUnit(s_input.unit_input_refractive_index_spectral.value(), "m");
-							
-							for(int j = 0; j < loaded_data.size(); ++j)
-							{
-								loaded_data[j][0] = loaded_data[j][0] * scale;
-							}
-						}
-						else if(spectral.dimension == SpectralCoordinateDimension::Wavenumber) // 計算も入力ファイルは波数の場合
-						{
-							double scale = scaleUnit(s_input.unit_input_refractive_index_spectral.value(), "m-1");
-							
-							for(int j = 0; j < loaded_data.size(); ++j)
-							{
-								loaded_data[j][0] = loaded_data[j][0] * scale;
-							}
-						}
-					}
+					std::vector<std::vector<double>> loaded_data;
 
-					std::sort(loaded_data.begin(), loaded_data.end(), [](const std::vector<double>& a, const std::vector<double>& b){return a[0] < b[0];});
+					if(spectral.spectral_dimension == SpectralCoordinateDimension::Wavelength)
+					{
+						loaded_data = loadRefractiveIndexSpectralFile(s_input.filename_refractive_index_spectral.value(), "wavelength", "nr", "ni", "m");
+					}
+					else if(spectral.spectral_dimension == SpectralCoordinateDimension::Wavenumber)
+					{
+						loaded_data = loadRefractiveIndexSpectralFile(s_input.filename_refractive_index_spectral.value(), "wavenumber", "nr", "ni", "m-1");
+					}
 
 					for(int j = 0; j < n_layers; ++j)
 					{
-						s.refractive_index[j].resize(loaded_data.size());
-
-						for(int k = 0; k < loaded_data.size(); ++k)
-						{
-							s.refractive_index[j][k] = {loaded_data[k][0], loaded_data[k][1], loaded_data[k][2]};
-						}
+						s.refractive_index[j] = loaded_data;
 					}
 				}
 				else if(s_input.refractive_index_type.value() == RefractiveIndexType::Vertical)
@@ -324,86 +312,15 @@ std::vector<Species> ModelBuilder::buildSpecies_(const Configuration& configurat
 					// 外部ファイル読み込み
 					// 読み込んだ配列 std::vector<std::vector<std::vector<double>>> loaded_data ({altitude, spectral, nr, ni}の配列)
 					// loaded_data[n_alt][n_spec] = {alt, spec, nr, ni}
-					std::vector<std::vector<std::vector<double>>> loaded_data = loadSpectralVerticalFile(s_input.filename_refractive_index_spectral_vertical.value());
-					std::string unit_alt_input = s_input.unit_refractive_index_spectral_vertical[0].value();
-					std::string unit_spec_input = s_input.unit_refractive_index_spectral_vertical[1].value();
-
-					SpectralCoordinateDimension input_dim;
-					if(getUnitInfo(unit_spec_input).dim == UnitDim::Length)
+					std::vector<std::vector<std::vector<double>>> loaded_data;
+					if(spectral.spectral_dimension == SpectralCoordinateDimension::Wavelength)
 					{
-						input_dim = SpectralCoordinateDimension::Wavelength;
+						loaded_data = loadRefractiveIndexSpectralVerticalFile(s_input.filename_refractive_index_spectral_vertical.value(), "altitude", "wavelength", "nr", "ni", "m", "m");
 					}
-					else if(getUnitInfo(unit_spec_input).dim == UnitDim::Wavenumber)
+					else if(spectral.spectral_dimension == SpectralCoordinateDimension::Wavenumber)
 					{
-						input_dim = SpectralCoordinateDimension::Wavenumber;
+						loaded_data = loadRefractiveIndexSpectralVerticalFile(s_input.filename_refractive_index_spectral_vertical.value(), "altitude", "wavenumber", "nr", "ni", "m", "m-1");
 					}
-
-					//ファイルのスペクトル次元と計算スペクトル次元が異なる場合
-					if(spectral.dimension != input_dim)
-					{
-						if(spectral.dimension == SpectralCoordinateDimension::Wavelength) // 計算は波長だが入力ファイルは波数の場合
-						{
-							double scale = scaleUnit(unit_spec_input, "m-1");
-							// 読み込んだスペクトルの逆数を取る
-							for(int j = 0; j < loaded_data.size(); ++j)
-							{
-								for(int k = 0; k < loaded_data[j].size(); ++k)
-								{
-									loaded_data[j][k][1] = 1.0 / (loaded_data[j][k][1] * scale);
-								}
-
-								std::sort(loaded_data[j].begin(), loaded_data[j].end(), [](const std::vector<double>& a, const std::vector<double>& b){return a[1] < b[1];});
-							}
-						}
-						else if(spectral.dimension == SpectralCoordinateDimension::Wavenumber) // 計算は波数だが入力ファイルは波長の場合
-						{
-							double scale = scaleUnit(unit_spec_input, "m");
-							// 読み込んだスペクトルの逆数を取る
-							for(int j = 0; j < loaded_data.size(); ++j)
-							{
-								for(int k = 0; k < loaded_data[j].size(); ++k)
-								{
-									loaded_data[j][k][1] = 1.0 / (loaded_data[j][k][1] * scale);
-								}
-
-								std::sort(loaded_data[j].begin(), loaded_data[j].end(), [](const std::vector<double>& a, const std::vector<double>& b){return a[1] < b[1];});
-							}
-						}
-					}
-					else
-					{
-						if(spectral.dimension == SpectralCoordinateDimension::Wavelength) // 計算も入力ファイルは波長の場合
-						{
-							double scale = scaleUnit(unit_spec_input, "m");
-							// 読み込んだスペクトルの逆数を取る
-							for(int j = 0; j < loaded_data.size(); ++j)
-							{
-								for(int k = 0; k < loaded_data[j].size(); ++k)
-								{
-									loaded_data[j][k][1] = loaded_data[j][k][1] * scale;
-								}
-
-								std::sort(loaded_data[j].begin(), loaded_data[j].end(), [](const std::vector<double>& a, const std::vector<double>& b){return a[1] < b[1];});
-							}
-						}
-						else if(spectral.dimension == SpectralCoordinateDimension::Wavenumber) // 計算も入力ファイルは波数の場合
-						{
-							double scale = scaleUnit(unit_spec_input, "m-1");
-							// 読み込んだスペクトルの逆数を取る
-							for(int j = 0; j < loaded_data.size(); ++j)
-							{
-								for(int k = 0; k < loaded_data[j].size(); ++k)
-								{
-									loaded_data[j][k][1] = loaded_data[j][k][1] * scale;
-								}
-
-								std::sort(loaded_data[j].begin(), loaded_data[j].end(), [](const std::vector<double>& a, const std::vector<double>& b){return a[1] < b[1];});
-							}
-						}
-					}
-					
-					// 入力データを高度順にソート (補間のため必須)
-					std::sort(loaded_data.begin(), loaded_data.end(), [](const std::vector<std::vector<double>>& a, const std::vector<std::vector<double>>& b){return a[0][0] < b[0][0];});
 
 					// 入力データの高度リストを作成（検索用）
 					std::vector<double> input_alts(loaded_data.size());
@@ -425,7 +342,6 @@ std::vector<Species> ModelBuilder::buildSpecies_(const Configuration& configurat
 						auto it = std::lower_bound(input_alts.begin(), input_alts.end(), target_alt);
 
 						// 補間結果を格納するベクタを準備
-						// (サイズは入力データのスペクトル数と同じと仮定)
 						size_t n_spec = loaded_data[0].size();
 						s.refractive_index[j].resize(n_spec);
 
@@ -567,7 +483,7 @@ std::vector<Species> ModelBuilder::buildSpecies_(const Configuration& configurat
 			}
 		}
 
-		if(is_hitran == false)
+		if(s.is_hitran == false)
 		{
 			species.push_back(s);
 		}
@@ -708,12 +624,10 @@ std::vector<Species> ModelBuilder::buildSpecies_(const Configuration& configurat
 		}
 	}
 
-	// ...
-
 	return species;
 }
 
-AtmosphereModel ModelBuilder::buildAtmosphereModel(const Configuration& configuration)
+AtmosphereModel ModelBuilder::buildAtmosphereModel(const Configuration& configuration, const SpectralInformation& spectral)
 {
 	AtmosphereModel model;
 
@@ -883,7 +797,7 @@ AtmosphereModel ModelBuilder::buildAtmosphereModel(const Configuration& configur
 	{
 		for(int i = 0; i < n_layer; i ++)
 		{
-			model.pressure[i] = configuration.pressure_profile[i][1] * scaleUnit(configuration.atmosphere.pressure_unit[1].value(), "Pa");
+			model.pressure[i] = configuration.atmosphere.pressure_profile[i][1] * scaleUnit(configuration.atmosphere.pressure_unit[1].value(), "Pa");
 		}
 	}
 
@@ -937,11 +851,11 @@ AtmosphereModel ModelBuilder::buildAtmosphereModel(const Configuration& configur
 
 					for(int i = 0; i < configuration.atmosphere.number_density_profile.size(); i ++)
 					{
-						if(configuration.atmosphere.unit_dim_number_density == UnitDim::NumberDensity)
+						if(configuration.atmosphere.unit_dim_number_density.value() == UnitDim::NumberDensity)
 						{
 							profile_data[i] = {configuration.atmosphere.number_density_profile[i][0] * scaleUnit(configuration.atmosphere.number_density_unit[0].value(), "m"), configuration.atmosphere.number_density_profile[i][1] * scaleUnit(configuration.atmosphere.number_density_unit[1].value(), "m-3")};
 						}
-						else if(configuration.atmosphere.unit_dim_number_density == UnitDim::ColumnNumberDensity)
+						else if(configuration.atmosphere.unit_dim_number_density.value() == UnitDim::ColumnNumberDensity)
 						{
 							profile_data[i] = {configuration.atmosphere.number_density_profile[i][0] * scaleUnit(configuration.atmosphere.number_density_unit[0].value(), "m"), configuration.atmosphere.number_density_profile[i][1] * scaleUnit(configuration.atmosphere.number_density_unit[1].value(), "m-2")};
 						}
@@ -950,11 +864,11 @@ AtmosphereModel ModelBuilder::buildAtmosphereModel(const Configuration& configur
 				
 				for(int i = 0; i < n_layer; ++i)
 				{
-					if(configuration.atmosphere.unit_dim_number_density == UnitDim::NumberDensity)
+					if(configuration.atmosphere.unit_dim_number_density.value() == UnitDim::NumberDensity)
 					{
 						model.number_density[i] = interpolateVerticalProfile(model.altitude[i], profile_data, configuration.atmosphere.vertical_number_density_interpolation.value());
 					}
-					else if(configuration.atmosphere.unit_dim_number_density == UnitDim::ColumnNumberDensity)
+					else if(configuration.atmosphere.unit_dim_number_density.value() == UnitDim::ColumnNumberDensity)
 					{
 						model.number_density[i] = interpolateVerticalProfile(model.altitude[i], profile_data, configuration.atmosphere.vertical_number_density_interpolation.value()) / (model.altitude_top[i] - model.altitude_bottom[i]);
 					}
@@ -969,11 +883,11 @@ AtmosphereModel ModelBuilder::buildAtmosphereModel(const Configuration& configur
 		{
 			for(int i = 0; i < n_layer; i ++)
 			{
-				if(configuration.atmosphere.unit_dim_number_density == UnitDim::NumberDensity)
+				if(configuration.atmosphere.unit_dim_number_density.value() == UnitDim::NumberDensity)
 				{
 					model.number_density[i] = configuration.atmosphere.number_density_profile[i][1] * scaleUnit(configuration.atmosphere.number_density_unit[1].value(), "m-3");
 				}
-				else if(configuration.atmosphere.unit_dim_number_density == UnitDim::ColumnNumberDensity)
+				else if(configuration.atmosphere.unit_dim_number_density.value() == UnitDim::ColumnNumberDensity)
 				{
 					model.number_density[i] = configuration.atmosphere.number_density_profile[i][1] * scaleUnit(configuration.atmosphere.number_density_unit[1].value(), "m-2") / (model.altitude_top[i] - model.altitude_bottom[i]);
 				}
@@ -981,11 +895,43 @@ AtmosphereModel ModelBuilder::buildAtmosphereModel(const Configuration& configur
 		}
 	}
 
-	model.species = buildSpecies_(configuration, model);
+	model.species = buildSpecies_(configuration, model, spectral);
 
-	if(hitran)
+	bool is_hitran = false;
+
+	for(int i = 0; i < model.species.size(); ++i)
 	{
-		// diluent;
+		if(model.species[i].is_hitran)
+		{
+			is_hitran = true;
+			break;
+		}
+	}
+
+	if(is_hitran)
+	{
+		std::vector<std::string> dil_species = {"AIR", "CO2", "H2", "HE", "H2O"};
+		std::vector<double> dil_ratio(5, 0.0);
+
+		for(int i = 0; i < configuration.atmosphere.diluent_species.size(); ++i)
+		{
+			std::string dil_sp = toUpper(configuration.atmosphere.diluent_species[i]);
+			
+			for(int j = 0; j < dil_species.size(); ++j)
+			{
+				if(dil_sp == dil_species[j])
+				{
+					dil_ratio[j] = configuration.atmosphere.diluent_ratio[i];
+					break;
+				}
+			}
+			
+			model.diluent.air = dil_ratio[0];
+			model.diluent.CO2 = dil_ratio[1];
+			model.diluent.H2 = dil_ratio[2];
+			model.diluent.He = dil_ratio[3];
+			model.diluent.H2O = dil_ratio[4];
+		}
 	}
 
 	return model;
@@ -1345,6 +1291,340 @@ inline std::vector<std::vector<std::vector<double>>> generatePowerLawSizeDistrib
 
 	return {size_distribution, weight};
 }
+
+inline std::vector<std::vector<double>> loadSpectralFile(std::string filename, std::string var_name_spectral, std::string var_name_value, std::string unit_target_spectral, std::string unit_target_value)
+{
+	try
+	{
+		netCDF::NcFile dataFile(filename, NcFile::read);
+
+		auto getVarSafe = [&](std::string name) -> netCDF::NcVar
+		{
+			netCDF::NcVar var = dataFile.getVar(name);
+			if(var.isNull())
+			{
+				throw std::runtime_error("NetCDF Variable '" + name + "' not found in " + filename);
+			}
+			return var;
+		};
+
+		netCDF::NcVar v_spec = getVarSafe(var_name_spectral);
+		netCDF::NcVar v_value = getVarSafe(var_name_value);
+
+		size_t n_data = v_spec.getDim(0).getSize();
+
+		// 単位変換
+		std::string source_unit_spec;
+		try
+		{
+			netCDF::NcVarAtt att = v_spec.getAtt("units");
+			if(!att.isNull()) att.getValues(source_unit_spec);
+		}
+		catch(...)
+		{
+			std::cout << "[Warning] 'units' missing for " << var_name_spectral << ". Assuming " << unit_target_spectral << "." << std::endl;
+			source_unit_spec = unit_target_spectral;
+		}
+
+		std::string source_unit_value;
+		try
+		{
+			netCDF::NcVarAtt att = v_value.getAtt("units");
+			if(!att.isNull()) att.getValues(source_unit_value);
+		}
+		catch(...)
+		{
+			std::cout << "[Warning] 'units' missing for " << var_name_value << ". Assuming " << unit_target_value << "." << std::endl;
+			source_unit_value = unit_target_value;
+		}
+
+		// double scale_spec = scaleUnit(source_unit_spec, unit_target_spectral);
+
+		// データ読み込み
+		std::vector<double> buf_spec(n_data);
+		std::vector<double> buf_value(n_data);
+
+		v_spec.getVar(buf_spec.data());
+		v_value.getVar(buf_value.data());
+
+		bool is_spectral_dimension_mismatch;
+		double scale_spec;
+
+		if(getUnitInfo(unit_target_spectral).dim != getUnitInfo(source_unit_spec).dim)
+		{
+			is_spectral_dimension_mismatch = true;
+			scale_spec = 1.0 / (getUnitInfo(source_unit_spec).to_si * getUnitInfo(unit_target_spectral).to_si);
+		}
+		else
+		{
+			is_spectral_dimension_mismatch = false;
+			scale_spec = scaleUnit(source_unit_spec, unit_target_spectral);
+		}
+
+		double scale_value = scaleUnit(source_unit_value, unit_target_value);
+
+		// 戻り値の構築 {{spec, nr, ni}, ...}
+		std::vector<std::vector<double>> result(n_data);
+		for(size_t i = 0; i < n_data; ++i)
+		{
+			if(is_spectral_dimension_mismatch == true)
+			{
+				result[i] = {1.0 / buf_spec[i] * scale_spec, buf_value[i] * scale_value};
+			}
+			else
+			{
+				result[i] = {buf_spec[i] * scale_spec, buf_value[i] * scale_value};
+			}
+		}
+
+		std::sort(result.begin(), result.end(), [](const auto& a, const auto& b){return a[0] < b[0];});
+
+		return result;
+	}
+	catch(const netcdf::exceptions::NcException& e)
+	{
+		throw std::runtime_error("NetCDF Error in " + filename + ": " + std::string(e.what()));
+	}
+}
+
+inline std::vector<std::vector<double>> loadRefractiveIndexSpectralFile(std::string filename, std::string var_name_spectral, std::string var_name_nr, std::string var_name_ni, std::string unit_target_spectral)
+{
+	try
+	{
+		netCDF::NcFile dataFile(filename, NcFile::read);
+
+		auto getVarSafe = [&](std::string name) -> netCDF::NcVar
+		{
+			netCDF::NcVar var = dataFile.getVar(name);
+			if(var.isNull())
+			{
+				throw std::runtime_error("NetCDF Variable '" + name + "' not found in " + filename);
+			}
+			return var;
+		};
+
+		netCDF::NcVar v_spec = getVarSafe(var_name_spectral);
+		netCDF::NcVar v_nr = getVarSafe(var_name_nr);
+		netCDF::NcVar v_ni = getVarSafe(var_name_ni);
+
+		size_t n_data = v_spec.getDim(0).getSize();
+		
+		// 次元整合性チェック
+		if (v_nr.getDim(0).getSize() != n_data || v_ni.getDim(0).getSize() != n_data)
+		{
+			throw std::runtime_error("Dimension size mismatch in refractive index file.");
+		}
+
+		// 単位変換 (屈折率は無次元なので、スペクトルのみ計算)
+		std::string source_unit_spec;
+		try
+		{
+			netCDF::NcVarAtt att = v_spec.getAtt("units");
+			if(!att.isNull()) att.getValues(source_unit_spec);
+		}
+		catch(...)
+		{
+			std::cout << "[Warning] 'units' missing for " << var_name_spectral << ". Assuming " << unit_target_spectral << "." << std::endl;
+			source_unit_spec = unit_target_spectral;
+		}
+
+		// double scale_spec = scaleUnit(source_unit_spec, unit_target_spectral);
+
+		// データ読み込み
+		std::vector<double> buf_spec(n_data);
+		std::vector<double> buf_nr(n_data);
+		std::vector<double> buf_ni(n_data);
+
+		v_spec.getVar(buf_spec.data());
+		v_nr.getVar(buf_nr.data());
+		v_ni.getVar(buf_ni.data());
+
+		bool is_spectral_dimension_mismatch;
+		double scale_unit;
+
+		if(getUnitInfo(unit_target_spectral).dim != getUnitInfo(source_unit_spec).dim)
+		{
+			is_spectral_dimension_mismatch = true;
+			scale_unit = 1.0 / (getUnitInfo(source_unit_spec).to_si * getUnitInfo(unit_target_spectral).to_si);
+		}
+		else
+		{
+			is_spectral_dimension_mismatch = false;
+			scale_unit = scaleUnit(source_unit_spec, unit_target_spectral);
+		}
+
+		// 戻り値の構築 {{spec, nr, ni}, ...}
+		std::vector<std::vector<double>> result(n_data);
+		for(size_t i = 0; i < n_data; ++i)
+		{
+			if(is_spectral_dimension_mismatch == true)
+			{
+				result[i] = {1.0 / buf_spec[i] * scale_unit, buf_nr[i], buf_ni[i]};
+			}
+			else
+			{
+				result[i] = {buf_spec[i] * scale_unit, buf_nr[i], buf_ni[i]};
+			}
+		}
+
+		std::sort(result.begin(), result.end(), [](const auto& a, const auto& b){return a[0] < b[0];});
+
+		return result;
+	}
+	catch(const netcdf::exceptions::NcException& e)
+	{
+		throw std::runtime_error("NetCDF Error in " + filename + ": " + std::string(e.what()));
+	}
+}
+
+inline std::vector<std::vector<std::vector<double>>> loadRefractiveIndexSpectralVerticalFile(std::string filename, std::string var_name_altitude, std::string var_name_spectral, std::string var_name_nr, std::string var_name_ni, std::string unit_target_altitude, std::string unit_target_spectral)
+{
+	try
+	{
+		netCDF::NcFile dataFile(filename, netCDF::NcFile::read);
+
+		// ヘルパー: 変数取得と存在チェック
+		auto getVarSafe = [&](std::string name) -> netCDF::NcVar
+		{
+			netCDF::NcVar var = dataFile.getVar(name);
+			if(var.isNull())
+			{
+				throw std::runtime_error("NetCDF Variable '" + name + "' not found in " + filename);
+			}
+			return var;
+		};
+
+		// 1. 変数オブジェクトの取得
+		netCDF::NcVar v_alt = getVarSafe(var_name_altitude);
+		netCDF::NcVar v_spec = getVarSafe(var_name_spectral);
+		netCDF::NcVar v_nr = getVarSafe(var_name_nr);
+		netCDF::NcVar v_ni = getVarSafe(var_name_ni);
+
+		// 2. 次元の取得 (変数の次元を参照する)
+		// ※変数名と次元名が異なっていても対応できるように getDim(0) を使用
+		size_t n_alt = v_alt.getDim(0).getSize();
+		size_t n_spec = v_spec.getDim(0).getSize();
+
+		// 2Dデータの次元チェック (念のため)
+		if (v_nr.getDimCount() != 2 || v_ni.getDimCount() != 2)
+		{
+			throw std::runtime_error("Refractive index variables (nr, ni) must be 2D [altitude, spectral].");
+		}
+
+		// 3. 単位変換係数の計算
+		// (NetCDFの "units" 属性を読み、ターゲット単位との比率を計算)
+
+		// 単位変換
+		std::string source_unit_spec;
+		try
+		{
+			netCDF::NcVarAtt att = v_spec.getAtt("units");
+			if(!att.isNull()) att.getValues(source_unit_spec);
+		}
+		catch(...)
+		{
+			std::cout << "[Warning] 'units' missing for " << var_name_spectral << ". Assuming " << unit_target_spectral << "." << std::endl;
+			source_unit_spec = unit_target_spectral;
+		}
+
+		std::string source_unit_alt;
+		try
+		{
+			netCDF::NcVarAtt att = v_alt.getAtt("units");
+			if(!att.isNull()) att.getValues(source_unit_alt);
+		}
+		catch(...)
+		{
+			std::cout << "[Warning] 'units' missing for " << var_name_altitude << ". Assuming " << unit_target_altitude << "." << std::endl;
+			source_unit_alt = unit_target_altitude;
+		}
+
+		bool is_spectral_dimension_mismatch;
+		double scale_spec;
+
+		if(getUnitInfo(unit_target_spectral).dim != getUnitInfo(source_unit_spec).dim)
+		{
+			is_spectral_dimension_mismatch = true;
+			scale_spec = 1.0 / (getUnitInfo(source_unit_spec).to_si * getUnitInfo(unit_target_spectral).to_si);
+		}
+		else
+		{
+			is_spectral_dimension_mismatch = false;
+			scale_spec = scaleUnit(source_unit_spec, unit_target_spectral);
+		}
+
+		double scale_alt = scaleUnit(source_unit_alt, unit_target_altitude);
+
+		// 4. データの読み込み & スケーリング
+		std::vector<double> altitudes(n_alt);
+		v_alt.getVar(altitudes.data());
+		for(auto& v : altitudes)
+		{
+			v *= scale_alt; // 単位変換
+		}
+
+		std::vector<double> spectral_grid(n_spec);
+		v_spec.getVar(spectral_grid.data());
+		for(auto& v : spectral_grid)
+		{
+			if(is_spectral_dimension_mismatch == true)
+			{
+				v = 1.0 / v * scale_spec; // 単位変換
+			}
+			else
+			{
+				v = v * scale_spec; // 単位変換
+			}
+		}
+
+		// 5. 2Dデータの読み込み
+		// NetCDF C++ はフラットな1次元配列に読み込む (順序: dim0(alt) -> dim1(spec))
+		std::vector<double> buffer_nr(n_alt * n_spec);
+		std::vector<double> buffer_ni(n_alt * n_spec);
+
+		v_nr.getVar(buffer_nr.data());
+		v_ni.getVar(buffer_ni.data());
+
+		// 6. 戻り値の形式に整形
+		// [Layer][Spec][Alt, Wl, Nr, Ni]
+		std::vector<std::vector<std::vector<double>>> result(n_alt);
+
+		// 高度方向のループ
+		for(size_t i = 0; i < n_alt; ++i)
+		{
+			result[i].resize(n_spec);
+			double current_alt = altitudes[i];
+
+			// スペクトル方向のループ
+			for(size_t k = 0; k < n_spec; ++k)
+			{
+				size_t idx = i * n_spec + k; // フラットインデックス
+				
+				result[i][k] = {current_alt, spectral_grid[k], buffer_nr[idx], buffer_ni[idx]};
+			}
+
+			std::sort(result[i].begin(), result[i].end(), [](const std::vector<double>& a, const std::vector<double>& b){return a[1] < b[1];});
+		}
+
+		std::sort(result.begin(), result.end(), [](const std::vector<std::vector<double>>& a, const std::vector<std::vector<double>>& b){return a[0][0] < b[0][0];});
+
+		return result;
+	}
+	catch(const netcdf::exceptions::NcException& e)
+	{
+		throw std::runtime_error("NetCDF Error in " + filename + ": " + std::string(e.what()));
+	}
+}
+
+
+
+
+
+
+
+
+
+
 
 
 

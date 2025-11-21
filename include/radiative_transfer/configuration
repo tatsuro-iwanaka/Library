@@ -2308,15 +2308,31 @@ inline void Configuration::validateConfiguration(void)
 				{
 					atmosphere.species_configuration[i].filename_refractive_index_spectral.reset();
 
-					if(!atmosphere.species_configuration[i].unit_refractive_index_spectral_vertical.has_value())
+					if(!atmosphere.species_configuration[i].unit_refractive_index_spectral_vertical[0].has_value() && !atmosphere.species_configuration[i].unit_refractive_index_spectral_vertical[1].has_value())
 					{
 						atmosphere.species_configuration[i].unit_refractive_index_spectral_vertical = {atmosphere.z_unit.value(), spectral_coordinate.unit.value()};
 						std::cout << "[Configuration::validateConfiguration] Unit of refractive index input file for species " + std::to_string(i) + " was not specified. Automatically set to (" << atmosphere.z_unit.value() <<", " << spectral_coordinate.unit.value() << ")." << std::endl;
+					}
+					else if(!atmosphere.species_configuration[i].unit_refractive_index_spectral_vertical[0].has_value())
+					{
+						atmosphere.species_configuration[i].unit_refractive_index_spectral_vertical[0] = atmosphere.z_unit.value();
+						std::cout << "[Configuration::validateConfiguration] Vertical unit of refractive index input file for species " + std::to_string(i) + " was not specified. Automatically set to " << atmosphere.z_unit.value() <<"." << std::endl;
+					}
+					else if(!atmosphere.species_configuration[i].unit_refractive_index_spectral_vertical[1].has_value())
+					{
+						atmosphere.species_configuration[i].unit_refractive_index_spectral_vertical[1] = spectral_coordinate.unit.value();
+						std::cout << "[Configuration::validateConfiguration] Spectral unit of refractive index input file for species " + std::to_string(i) + " was not specified. Automatically set to " << spectral_coordinate.unit.value() <<"." << std::endl;
 					}
 					
 					if(!atmosphere.species_configuration[i].filename_refractive_index_spectral_vertical.has_value())
 					{
 						throw std::runtime_error("[Configuration::validateConfiguration] filename_refractive_index_spectral_vertical value for species "+ std::to_string(i) + " was not specified.");
+					}
+
+					if(!atmosphere.species_configuration[i].refractive_index_vertical_profile_interpolation.has_value())
+					{
+						atmosphere.species_configuration[i].refractive_index_vertical_profile_interpolation = VerticalProfileInterpolation::Linear;
+						std::cout << "[Configuration::validateConfiguration] Refractive Index Vertical profile interpolation for species "+ std::to_string(i) + " was not specified. Automatically set to linear." << std::endl;
 					}
 				}
 			}
