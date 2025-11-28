@@ -953,7 +953,7 @@ inline void Configuration::validateConfiguration(void)
 	// Simulation
 	if(!simulation.simulation_name.has_value())
 	{
-		simulation.simulation_name = "untitiled";
+		simulation.simulation_name = "untitled";
 		std::cout << "[Configuration::validateConfiguration] Simulation name was not specified. Automatically set to 'untitled'." << std::endl;
 	}
 	if(!simulation.directory_name.has_value())
