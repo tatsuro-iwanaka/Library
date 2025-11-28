@@ -779,8 +779,6 @@ class RadiativeTransfer
 		RadiativeTransferResult result_;
 
 		std::string config_filename_;
-
-		RadiativeTransferResult convolve_(const RadiativeTransferResult& radiative_transfer_result);
 		
 	public:
 		RadiativeTransfer();
