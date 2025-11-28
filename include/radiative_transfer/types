@@ -215,14 +215,15 @@ const inline std::map<std::string, GridType> map_grid_type =
 	{"REGULAR", GridType::Regular}
 };
 
-enum class InstrumentFunctionType{Gauss, Rectangle, Table, External};
+enum class InstrumentFunctionType{Delta, Gauss, Rectangle, External};
 const inline std::map<std::string, InstrumentFunctionType> map_instrument_function_type =
 {
+	{"NONE",  InstrumentFunctionType::Delta},
+	{"DELTA",  InstrumentFunctionType::Delta},
 	{"GAUSS",  InstrumentFunctionType::Gauss},
 	{"GAUSSIAN",  InstrumentFunctionType::Gauss},
 	{"RECTANGLE", InstrumentFunctionType::Rectangle},
 	{"RECTANGULAR", InstrumentFunctionType::Rectangle},
-	{"TABLE", InstrumentFunctionType::Table},
 	{"EXTERNAL", InstrumentFunctionType::External}
 };
 
@@ -276,13 +277,13 @@ struct Species
 		// double absorption_cross_section;	//m^2/molecule
 		// double scattering_cross_section;	//m^2/molecule
 
-		std::vector<double> absorption_cross_section_spectrum; // spectral, m^2/molecule
-		std::vector<double> scattering_cross_section_spectrum; // spectral, m^2/molecule
-		std::vector<std::vector<std::vector<double>>> refrtactive_index; // altitude, spectral, nr, ni
+		std::vector<std::vector<double>> absorption_cross_section_spectrum; // spectral, m^2/molecule
+		std::vector<std::vector<double>> scattering_cross_section_spectrum; // spectral, m^2/molecule
+		std::vector<std::vector<std::vector<double>>> refractive_index; // altitude, spectral, nr, ni
 
 		std::vector<double> vertical_number_density_profile;	// m-3
 		std::vector<double> vertical_mixing_ratio_profile;	// mol/mol
-		std::vector<std::vector<double>> refractive_index_vertical_profile; // nr, ni
+		// std::vector<std::vector<double>> refractive_index_vertical_profile; // nr, ni
 
 		bool is_hitran;
 		hitran::Isotopologue isotopologue;
@@ -298,7 +299,10 @@ struct OpticalLayer
 		double optical_thickness; //dimensionless
 		double single_scattering_albedo; //ks/(ks + ka)
 
-		int n_doubling = 0;
+		bool enable_atmospheric_emission;
+
+		// for surface
+		double surface_albedo;
 
 		double asymmetry_parameter;
 
@@ -318,6 +322,18 @@ struct RadiativeLayer
 		std::vector<Eigen::MatrixXd> transmittance_m_top_sin;
 		std::vector<Eigen::MatrixXd> transmittance_m_bottom_sin;
 
+		Eigen::MatrixXd source_up;
+		Eigen::MatrixXd source_down;
+
+		int n_doubling;
+
+		bool enable_atmospheric_emission;
+
+		// std::vector<std::vector<std::vector<double>>> reflectance_top;
+		// std::vector<std::vector<std::vector<double>>> reflectance_bottom;
+		// std::vector<std::vector<std::vector<double>>> transmittance_top;
+		// std::vector<std::vector<std::vector<double>>> transmittance_bottom;
+
 		double optical_thickness; //dimensionless
 };
 
@@ -328,6 +344,7 @@ struct AtmosphereModel
 		SurfaceType surface_type;
 		double surface_temperature;
 		double surface_albedo;
+		bool enable_atmospheric_emission;
 		std::vector<double> altitude_bottom;
 		std::vector<double> altitude_top;
 		std::vector<double> altitude;
@@ -567,23 +584,42 @@ class Configuration
 			std::optional<SpectralCoordinateType> spectral_coordinate_type;
 			std::optional<std::string> unit;
 			std::optional<double> mono; // m or m-1, for monochrome
-			std::optional<double> min; // m or m-1, for spectrum, bandpass
-			std::optional<double> max; // m or m-1, for spectrum, bandpass
+			std::optional<double> min; // m or m-1, for spectrum
+			std::optional<double> max; // m or m-1, for spectrum
 			std::optional<int> n_spectral; // (11)
 			std::optional<double> increment; // m or m-1
-			std::vector<double> specral_grid;
+			std::vector<double> spectral_grid;
 		};
 
 		struct Instrument
 		{
-			std::optional<InstrumentFunctionType> instrument_function_type;
-			std::optional<double> instrument_function_sigma; // sigma
-			std::optional<double> instrument_function_center; // center (for bandpass)
-			std::optional<double> instrument_function_width; //  width (rectangle)
-			std::optional<int> instrument_sampling_count;
-			std::optional<std::string> filename_instrument_function;
-			std::optional<std::string> instrument_function_unit;
-			std::vector<std::vector<double>> instrument_function;
+			// slit function for spectrum calculation
+			// カーネルを指定する場合はmin/maxだけ．over_sampling_countからサンプリングは自動で決定
+			std::optional<InstrumentFunctionType> convolution_kernel_type;
+			std::optional<double> kernel_width; // for rectangular
+			std::optional<double> kernel_sigma; // for gaussian
+			std::optional<double> kernel_cut_off_sigma; // for gaussian
+			std::optional<int> over_sampling_count;
+
+			// banspass filter for bandpass calculation
+			std::optional<InstrumentFunctionType> filter_function_type;
+			std::optional<double> filter_sigma; // for gaussian
+			std::optional<double> filter_center; // for delta/gaussian/rectangular
+			std::optional<double> filter_width; // for rectangular
+			std::optional<double> filter_cut_off_sigma; // for gaussian
+			std::optional<int> sampling_count;
+			std::optional<std::string> filename_filter_function;
+
+			// std::optional<InstrumentFunctionType> instrument_function_type;
+			// std::optional<double> instrument_function_sigma; // sigma
+			// std::optional<double> instrument_function_center; // center (for bandpass)
+			// std::optional<double> instrument_function_width; //  width (rectangle)
+			// std::optional<int> instrument_sampling_count;
+			// std::optional<std::string> filename_instrument_function;
+			// std::optional<std::string> instrument_function_unit;
+			// std::vector<std::vector<double>> instrument_function;
+
+			// banspass filter for bandpass calculation
 		};
 
 		struct Surface
@@ -790,7 +826,7 @@ class ConfigurationLoader
 class MonochromeData
 {
 	public:
-		std::vector<std::vector<std::vector<double>>> reflectance_top; // e, i, p?
+		// std::vector<std::vector<std::vector<double>>> reflectance_top; // e, i, p?
 
 		std::vector<Eigen::MatrixXd> reflectance_m_top_cos; // m, e, i
 		std::vector<Eigen::MatrixXd> reflectance_m_top_sin; // m, e, i
@@ -827,11 +863,20 @@ class RadiativeTransferResult
 		void exportResultNetCDF(std::string);
 };
 
-class RadiativeTransferCalculator
+class RadiativeTransferSolver
 {
 	private:
 		Geometry geometry_;
+		
+		double initial_optical_thickness_;
 
+		RadiativeLayer initializeAtmosphericLayer_(const OpticalLayer&);
+		RadiativeLayer initializeSurfaceLayer_(const OpticalLayer&);
+
+		std::vector<OpticalLayer> setAtmosphericLayerCondition_(const AtmosphereModel&, double, SpectralCoordinateDimension, int);
+		OpticalLayer setSurfaceLayerCondition_(const AtmosphereModel&, double, SpectralCoordinateDimension);
+
+		// void setLayerCondition_(const AtmosphereModel&, double, SpectralCoordinateDimension);
 		// void initializeLayer_(Layer&);
 		// void initializeSurface_(Layer&);
 		// void setLayerCondition_(AtmosphereModel&, double);
@@ -845,8 +890,13 @@ class RadiativeTransferCalculator
 		// void validateAtmosphererModel_(const AtmosphereModel&);
 
 	public:
-		RadiativeTransferCalculator(const Geometry&);
-		RadiativeTransferResult computeMonochrome(const AtmosphereModel&, double, SpectralCoordinateDimension);
+		RadiativeTransferSolver(const Geometry&);
+
+		MonochromeData computeMonochrome(const AtmosphereModel&, double, SpectralCoordinateDimension, double);
+		std::vector<std::vector<std::vector<double>>> reconstruct(const std::vector<std::vector<std::vector<std::vector<double>>>>&);
+		// void reconstructOpticalProperties(RadiativeLayer&);
+		std::vector<std::vector<Eigen::MatrixXd>> computeFourierSeriesCoefficients(const std::vector<std::vector<std::vector<double>>>&);
+		// void computeFourierSeriesCoefficients(RadiativeLayer&);
 };
 
 struct SpectralInformation
@@ -855,15 +905,19 @@ struct SpectralInformation
 		std::vector<double> spectral_grid; // m or m-1
 		SpectralCoordinateDimension spectral_dimension; // wavelength or wavenumber
 
+		std::vector<double> convolution_kernel; // size = over_sampling_count;
+		std::vector<double> filter_function; // size = spectral_grid.size()
+		std::vector<double> filter_weight;
+
 		// instrumentの情報のことも格納
-}
+};
 
 class ModelBuilder
 {
 	public:
 		static AtmosphereModel buildAtmosphereModel(const Configuration&, const SpectralInformation&);
 		static Geometry buildGeometry(const Configuration&);
-		static SpectralInformation buildSpectrum(const Configuration&);
+		static SpectralInformation buildSpectral(const Configuration&);
 
 	private:
 		static std::vector<Species> buildSpecies_(const Configuration&, const AtmosphereModel&, const SpectralInformation&);
@@ -875,12 +929,12 @@ class SpectralCalculator
 	private:
 		Configuration configuration_;
 		AtmosphereModel atmosphere_model_;
-		RadiativeTransferCalculator radiative_transfer_;
+		RadiativeTransferSolver radiative_transfer_;
 
 		RadiativeTransferResult convolve_(const RadiativeTransferResult& radiative_transfer_result);
 		
 	public:
-		SpectralCalculator(const Configuration&, const AtmosphereModel&, const RadiativeTransferCalculator&);
+		SpectralCalculator(const Configuration&, const AtmosphereModel&, const RadiativeTransferSolver&);
 		RadiativeTransferResult calculate(void);
 };
 

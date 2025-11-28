@@ -240,7 +240,7 @@ inline Configuration::SpectralCoordinate ConfigurationLoader::loadSpectralCoordi
 	int n_lambda = countArrayEntries_(kv, prefix + "tics");
 	for(int i = 0; i < n_lambda; i ++)
 	{
-		spectral_coordinate.specral_grid.push_back(getRequiredDouble_(kv, prefix + "tics." + std::to_string(i)));
+		spectral_coordinate.spectral_grid.push_back(getRequiredDouble_(kv, prefix + "tics." + std::to_string(i)));
 	}
 
 	spectral_coordinate.min = getOptionalDouble_(kv, prefix + "min");
@@ -295,6 +295,7 @@ inline Configuration::Surface ConfigurationLoader::loadSurface_(const std::map<s
 	return surface;
 }
 
+// 要修正：netcdf対応
 inline Configuration::Atmosphere ConfigurationLoader::loadAtmosphere_(const std::map<std::string, std::string>& kv)
 {
 	Configuration::Atmosphere atmosphere;
@@ -581,7 +582,8 @@ inline Configuration::Atmosphere ConfigurationLoader::loadAtmosphere_(const std:
 			{
 				s.is_refractive_index_same_layering_atmosphere = true;
 			}
-			for(int j = 0; j < n_vert; j ++)
+			int n_tics = countArrayEntries_(kv, base + "refractive_index.table");
+			for(int j = 0; j < n_tics; j ++)
 			{
 				if(s.is_refractive_index_same_layering_atmosphere)
 				{
@@ -611,6 +613,7 @@ inline Configuration::Atmosphere ConfigurationLoader::loadAtmosphere_(const std:
 	return atmosphere;
 }
 
+// 要修正：netcdf対応
 inline Configuration::Instrument ConfigurationLoader::loadInstrument_(const std::map<std::string, std::string>& kv)
 {
 	Configuration::Instrument instrument;
@@ -898,6 +901,7 @@ template<typename EnumT> inline std::optional<EnumT> ConfigurationLoader::parseE
 	throw std::runtime_error("Unknown TypeName: " + s.value());
 }
 
+// 要修正：netcdf対応
 inline void Configuration::validateConfiguration(void)
 {
 	// Simulation
@@ -1033,14 +1037,14 @@ inline void Configuration::validateConfiguration(void)
 			{
 				throw std::runtime_error("[Configuration::validateConfiguration] Spectral increment was over specified.");
 			}
-			if(spectral_coordinate.specral_grid.empty())
+			if(spectral_coordinate.spectral_grid.empty())
 			{
 				throw std::runtime_error("[Configuration::validateConfiguration] Spectral grid was not specified for spectrum calculation.");
 			}
 		}
 		else
 		{
-			if(!spectral_coordinate.specral_grid.empty())
+			if(!spectral_coordinate.spectral_grid.empty())
 			{
 				throw std::runtime_error("[Configuration::validateConfiguration] Spectral grid was overspecified.");
 			}
@@ -1076,14 +1080,14 @@ inline void Configuration::validateConfiguration(void)
 		}
 		else 
 		{
-			if(!spectral_coordinate.min.has_value() || !spectral_coordinate.max.has_value())
-			{
-				throw std::runtime_error("[Configuration::validateConfiguration] Spectral range was not specified for bandpass calculation.");
-			}
-			if(spectral_coordinate.min.value() >= spectral_coordinate.max.value())
-			{
-				throw std::runtime_error("[Configuration::validateConfiguration] Spectral range error (min >= max).");
-			}
+			// if(!spectral_coordinate.min.has_value() || !spectral_coordinate.max.has_value())
+			// {
+			// 	throw std::runtime_error("[Configuration::validateConfiguration] Spectral range was not specified for bandpass calculation.");
+			// }
+			// if(spectral_coordinate.min.value() >= spectral_coordinate.max.value())
+			// {
+			// 	throw std::runtime_error("[Configuration::validateConfiguration] Spectral range error (min >= max).");
+			// }
 		}
 	}
 
@@ -2267,7 +2271,7 @@ inline void Configuration::validateConfiguration(void)
 				}
 				else if(atmosphere.species_configuration[i].refractive_index_type.value() == RefractiveIndexType::Vertical)
 				{
-					if(s_config.refractive_index_vertical_profile.empty())
+					if(atmosphere.species_configuration[i].refractive_index_vertical_profile.empty())
 					{
 						throw std::runtime_error("[Configuration::validateConfiguration] Vertical refractive index profile table for species " + std::to_string(i) + " is empty.");
 					}

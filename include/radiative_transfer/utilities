@@ -29,6 +29,7 @@ double computeTrapezoidalIntegration(const std::vector<std::vector<double>>&);
 double computeSimpsonIntegration(const std::vector<std::vector<double>>&);
 std::vector<std::vector<double>> computeGaussRadauQuadratureNodeWeight(int);
 void normalizeWindowFunction(std::vector<double>&);
+inline std::vector<double> interpolateTableLinear(double, const std::vector<std::vector<double>>&, std::vector<double>, std::vector<double>);
 
 inline std::string toUpper(std::string s)
 {
@@ -533,6 +534,82 @@ inline void normalizeWindowFunction(std::vector<double>& f)
 	}
 
 	return;
+}
+
+inline std::vector<double> interpolateTableLinear(double x, const std::vector<std::vector<double>>& table, std::vector<double> extrapolation_left = {}, std::vector<double> extrapolation_right = {})
+{
+	// 0. エラーチェック
+	if (table.empty() || table[0].size() < 2)
+	{
+		return {}; // データがない、またはX列しかない
+	}
+
+	// 補間対象の次元数 (列数 - 1)
+	size_t num_values = table[0].size() - 1;
+
+	// ヘルパー: 外挿値の決定 (指定がなければ 0.0 埋め)
+	auto resolve_extrapolation = [&](const std::vector<double>& user_val) -> std::vector<double>
+	{
+		if (user_val.size() == num_values)
+		{
+			return user_val;
+		}
+
+		return std::vector<double>(num_values, 0.0);
+	};
+
+	// 1. 範囲外チェック (外挿処理)
+	if (x < table.front()[0])
+	{
+		return resolve_extrapolation(extrapolation_left);
+	}
+	if (x > table.back()[0])
+	{
+		return resolve_extrapolation(extrapolation_right);
+	}
+
+	// 2. 二分探索
+	auto it = std::lower_bound(table.begin(), table.end(), x, [](const std::vector<double>& row, double val){return row[0] < val;});
+
+	// 始点と一致する場合
+	if (it == table.begin())
+	{
+		// table.front() の [1] 以降をコピーして返す
+		return std::vector<double>(table.front().begin() + 1, table.front().end());
+	}
+
+	// 左側のインデックス
+	size_t j = std::distance(table.begin(), it) - 1;
+
+	// 3. 補間係数の計算
+	double x0 = table[j][0];
+	double x1 = table[j + 1][0];
+
+	// x間隔が極小の場合（ゼロ割防止）は左側の値を返す
+	if (std::abs(x1 - x0) < 1.0e-9)
+	{
+		return std::vector<double>(table[j].begin() + 1, table[j].end());
+	}
+
+	double r = (x - x0) / (x1 - x0);
+	double r_inv = 1.0 - r;
+
+	// 4. 全成分の線形補間ループ
+	std::vector<double> result;
+	result.reserve(num_values); // メモリ確保の効率化
+
+	// k=1 (2列目) から最後までループ
+	const auto& row0 = table[j];
+	const auto& row1 = table[j + 1];
+
+	for (size_t k = 1; k <= num_values; ++k)
+	{
+		double y0 = row0[k];
+		double y1 = row1[k];
+		result.push_back(r_inv * y0 + r * y1);
+	}
+
+	return result;
 }
 
 }

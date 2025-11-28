@@ -11,7 +11,7 @@
 namespace radiative_transfer
 {
 
-inline Layer doubleLayer(const Layer &layer, const Geometry &geometry)
+inline RadiativeLayer doubleLayer(const RadiativeLayer &layer, const Geometry &geometry)
 {
 	Eigen::VectorXd expu = Eigen::VectorXd::Zero(geometry.Ntheta);
 	Eigen::VectorXd expl = Eigen::VectorXd::Zero(geometry.Ntheta);
@@ -106,7 +106,7 @@ inline Layer doubleLayer(const Layer &layer, const Geometry &geometry)
 	return result;
 }
 
-inline Layer addLayer(const Layer &layer_bottom, const Layer &layer_top, const Geometry &geometry)
+inline RadiativeLayer addLayer(const RadiativeLayer &layer_bottom, const RadiativeLayer &layer_top, const Geometry &geometry)
 {
 	Eigen::VectorXd expu_top = Eigen::VectorXd::Zero(geometry.Ntheta);
 	Eigen::VectorXd expl_top = Eigen::VectorXd::Zero(geometry.Ntheta);

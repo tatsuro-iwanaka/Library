@@ -1,19 +1,21 @@
 #pragma once
 
-#include<complex>
-#include<random>
-#include<filesystem>
-#include<fstream>
-#include<omp.h>
-#include<iomanip>
-#include<thread>
-#include<chrono>
-#include<netcdf>
+#include <complex>
+#include <random>
+#include <filesystem>
+#include <fstream>
+#include <omp.h>
+#include <iomanip>
+#include <thread>
+#include <chrono>
+#include <netcdf>
+#include <cmath>
+#include <vector>
 
-#include<ctime>
-#include<sstream>
+#include <ctime>
+#include <sstream>
 
-#include<Eigen/Dense>
+#include <Eigen/Dense>
 
 #include"constants"
 #include"types"
@@ -29,27 +31,30 @@ namespace radiative_transfer
 
 void normalizeScatteringPhaseFunction(std::vector<std::vector<double>>&);
 void computeMieScattering(int, double, double, std::complex<double>, double&, double&, double&, std::vector<std::vector<double>>&);
-void computeMieScatteringSizeDistribution(int, double, const std::vector<std::vector<double>>&, const std::vector<std::vector<double>>&, std::complex<double>, double&, double&, double&, std::vector<std::vector<double>>&);
+void computeMieScatteringSizeDistribution(int, double, const std::vector<std::vector<double>>&, std::complex<double>, double&, double&, double&, std::vector<std::vector<double>>&);
+void normalizeScatteringPhaseFunction(std::vector<std::vector<double>>&);
 
-inline RadiativeTransferCalculator::RadiativeTransferCalculator(const Geometry& geometry)
+inline RadiativeTransferSolver::RadiativeTransferSolver(const Geometry& geometry)
 {
 	geometry_ = geometry;
 }
 
-inline RadiativeTransferResult RadiativeTransferCalculator::computeMonochrome(const AtmosphereModel& atmosphere_model, double spectrum, SpectralCoordinateDimenstion dimension)
+inline MonochromeData RadiativeTransferSolver::computeMonochrome(const AtmosphereModel& atmosphere_model, double spectral, SpectralCoordinateDimension dimension, double initial_optical_thickness = 1.0E-6)
 {
+	initial_optical_thickness_ = initial_optical_thickness;
+
 	double wavelength;
 	double wavenumber;
 
-	if(dimension == SpectralCoordinateDimenstion::Wavenumber)
+	if(dimension == SpectralCoordinateDimension::Wavenumber)
 	{
-		wavelength = 1.0 / spectrum;
-		wavenumber = spectrum;
+		wavelength = 1.0 / spectral;
+		wavenumber = spectral;
 	}
-	else if(dimension == SpectralCoordinateDimenstion::Wavelength)
+	else if(dimension == SpectralCoordinateDimension::Wavelength)
 	{
-		wavelength = spectrum;
-		wavenumber = 1.0 / spectrum;
+		wavelength = spectral;
+		wavenumber = 1.0 / spectral;
 	}
 	else
 	{
@@ -63,48 +68,49 @@ inline RadiativeTransferResult RadiativeTransferCalculator::computeMonochrome(co
 	std::vector<RadiativeLayer> atmosphere_layer_rad(n_layer);
 	RadiativeLayer result_layer_rad;
 
-	if(atmosphere_model.surface_type == SurfaceType::Lambert)
+	MonochromeData result;
+
+	if(atmosphere_model.surface_type != SurfaceType::NoSurface)
 	{
-		surface_layer_opt.
+
+		surface_layer_rad = initializeSurfaceLayer_(surface_layer_opt);
+		result_layer_rad = surface_layer_rad;
 	}
 
 	for(int i = 0; i < n_layer; ++i)
 	{
-		// doubling -> adding
-		;
+		atmosphere_layer_rad[i] = initializeAtmosphericLayer_(atmosphere_layer_opt[i]);
+
+		result.absorption_coefficient[i] = atmosphere_layer_opt[i].absorption_coefficient;
+		result.scattering_coefficient[i] = atmosphere_layer_opt[i].scattering_coefficient;
+		result.optical_thickness[i] = atmosphere_layer_opt[i].optical_thickness;
+		result.single_scattering_albedo[i] = atmosphere_layer_opt[i].single_scattering_albedo;
+		result.asymmetry_parameter[i] = atmosphere_layer_opt[i].asymmetry_parameter;
+
+		int n_doubling = atmosphere_layer_rad[i].n_doubling;
+
+		for(int j = 0; j < n_doubling; ++j)
+		{
+			atmosphere_layer_rad[i] = doubleLayer(atmosphere_layer_rad[i], geometry_);
+			// doubling;
+		}
+
+		if(atmosphere_model.surface_type == SurfaceType::NoSurface && i == 0)
+		{
+			result_layer_rad = atmosphere_layer_rad[i];
+		}
+		else
+		{
+			result_layer_rad = addLayer(result_layer_rad, atmosphere_layer_rad[i], geometry_);
+		}
 	}
 
-	if(atmosphere_model.surface_type != SurfaceType::NoSurface)
-	{
-		// from surface to toa
-		;
-	}
-
-	RadiativeTransferResult result;
-	result.spectral_data.resize(1);
-	result.spectral_data[0].reflectance_m_top_cos = result_layer_rad.reflectance_m_top_cos;
+	result.reflectance_m_top_cos = result_layer_rad.reflectance_m_top_cos;
+	result.reflectance_m_top_sin = result_layer_rad.reflectance_m_top_sin;
+	result.source_up = result_layer_rad.source_up;
 	// all other variables
 
 	return result;
-}
-
-inline void normalizeScatteringPhaseFunction(std::vector<std::vector<double>> &f)
-{
-	std::vector<std::vector<double>> phase_function_theta(f.size());
-
-	for(int i = 0; i < f.size(); i ++)
-	{
-		phase_function_theta[i] = {f[i][0], f[i][1] * 2.0 * PI * std::sin(f[i][0])};
-	}
-
-	double sum = computeSimpsonIntegration(phase_function_theta) / (4.0 * PI);
-
-	for(int i = 0; i < f.size(); i ++)
-	{
-		f[i][1] /= sum;
-	}
-
-	return;
 }
 
 inline void computeMieScattering(int n, double radius, double wavelength, std::complex<double> index, double& scattering_cross_section, double& absorption_cross_section, double& extinction_cross_section, std::vector<std::vector<double>>& phase_function)
@@ -151,7 +157,7 @@ inline void computeMieScattering(int n, double radius, double wavelength, std::c
 		}
 		else
 		{
-			auto zinv = 2.0 / z;
+			zinv = 2.0 / z;
 			auto aj = -(nstop + 1.5) * zinv;
 			auto alpha_j1 = aj + 1.0 / ((nstop + 0.5) * zinv);
 			auto alpha_j2 = aj;
@@ -307,9 +313,9 @@ inline void computeMieScattering(int n, double radius, double wavelength, std::c
 	return;
 }
 
-inline void computeMieScatteringSizeDistribution(int n_theta, double wavelength, const std::vector<std::vector<double>>& size_distribution, const std::vector<std::vector<double>>& weight, std::complex<double> index, double& scattering_cross_section, double& absorption_cross_section, double& extinction_cross_section, std::vector<std::vector<double>>& phase_function)
+inline void computeMieScatteringSizeDistribution(int n_theta, double wavelength, const std::vector<std::vector<double>>& weight, std::complex<double> index, double& scattering_cross_section, double& absorption_cross_section, double& extinction_cross_section, std::vector<std::vector<double>>& phase_function)
 {
-	int n_r = size_distribution.size();
+	int n_r = weight.size();
 	// std::vector<double> scs(n_r);
 	// std::vector<double> acs(n_r);
 	// std::vector<std::vector<std::vector<double>>> pf(n_r, std::vector<std::vector<double>>(n_theta, std::vector<double>(2)));
@@ -318,9 +324,10 @@ inline void computeMieScatteringSizeDistribution(int n_theta, double wavelength,
 
 	absorption_cross_section = 0.0;
 	scattering_cross_section = 0.0;
+	extinction_cross_section = 0.0;
 	phase_function = std::vector<std::vector<double>>(n_theta, std::vector<double>(2, 0.0));
 
-	double dtheta = PI / double(n_theta - 1);
+	double dtheta = PI / static_cast<double>(n_theta - 1);
 	for (int i = 0; i < n_theta; ++i)
 	{
 		phase_function[i][0] = dtheta * double(i);
@@ -330,8 +337,8 @@ inline void computeMieScatteringSizeDistribution(int n_theta, double wavelength,
 	{
 		double scs, acs, ecs;
 		std::vector<std::vector<double>> pf;
-		double n_dr = size_distribution[i][1] * weight[i][1];
-		computeMieScattering(n_theta, size_distribution[i][0], wavelength, index, scs, acs, ecs, pf);
+		double n_dr = weight[i][1];
+		computeMieScattering(n_theta, weight[i][0], wavelength, index, scs, acs, ecs, pf);
 		absorption_cross_section += acs * n_dr;
 		scattering_cross_section += scs * n_dr;
 		extinction_cross_section += ecs * n_dr;
@@ -352,18 +359,24 @@ inline void computeMieScatteringSizeDistribution(int n_theta, double wavelength,
 	return;
 }
 
+inline void normalizeScatteringPhaseFunction(std::vector<std::vector<double>> &f)
+{
+	std::vector<std::vector<double>> phase_function_theta(f.size());
 
+	for(int i = 0; i < f.size(); i ++)
+	{
+		phase_function_theta[i] = {f[i][0], f[i][1] * 2.0 * PI * std::sin(f[i][0])};
+	}
 
+	double sum = computeSimpsonIntegration(phase_function_theta) / (4.0 * PI);
 
+	for(int i = 0; i < f.size(); i ++)
+	{
+		f[i][1] /= sum;
+	}
 
-
-
-
-
-
-
-
-
+	return;
+}
 
 
 JacobianResult computeJacobian(std::string, JacobianType, double);
