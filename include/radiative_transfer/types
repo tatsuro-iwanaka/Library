@@ -253,6 +253,24 @@ class UnitInfo
 		double to_si;  // この単位 → SI 基本単位への乗数
 };
 
+class ArrheniusCrossSectionModel
+{
+private:
+	std::vector<double> spectral_;
+	
+	std::vector<double> slope_;
+	std::vector<double> intercept_;
+	
+	std::vector<bool> valid_flag_;
+
+	double interpolateTemperature_(std::int64_t, double) const;
+
+public:
+	void loadVectors(const std::vector<double>&, const std::vector<double>&, const std::vector<std::vector<double>>&);
+	void loadNetCDF(const std::string&, const std::string&, const std::string&, const std::string&, const std::string&, const std::string&, const std::string&);
+	double cross_section(double, double) const;
+};
+
 struct Species
 {
 	// ヤコビアン計算に必要な最低限を残す
@@ -279,6 +297,10 @@ struct Species
 
 		std::vector<std::vector<double>> absorption_cross_section_spectrum; // spectral, m^2/molecule
 		std::vector<std::vector<double>> scattering_cross_section_spectrum; // spectral, m^2/molecule
+
+		ArrheniusCrossSectionModel absorption_cross_section;
+		ArrheniusCrossSectionModel scattering_cross_section;
+		
 		std::vector<std::vector<std::vector<double>>> refractive_index; // altitude, spectral, nr, ni
 
 		std::vector<double> vertical_number_density_profile;	// m-3
@@ -352,6 +374,7 @@ struct AtmosphereModel
 		std::vector<double> pressure;
 		std::vector<double> number_density;
 		hitran::Diluent diluent;
+		bool is_hitran;
 		// bool enable_atmospheric_emission = false;
 };
 
@@ -491,6 +514,7 @@ class Configuration
 			// absorption cross section
 			std::optional<std::string> filename_absorption_cross_section;
 			std::optional<std::string> varname_absorption_cross_section_spectral;
+			std::optional<std::string> varname_absorption_cross_section_temperature;
 			std::optional<std::string> varname_absorption_cross_section;
 			// std::optional<std::string> unit_input_absorption_cross_section;
 			// std::optional<std::string> unit_input_absorption_spectral;
@@ -500,6 +524,7 @@ class Configuration
 			// scattering cross section
 			std::optional<std::string> filename_scattering_cross_section;
 			std::optional<std::string> varname_scattering_cross_section_spectral;
+			std::optional<std::string> varname_scattering_cross_section_temperature;
 			std::optional<std::string> varname_scattering_cross_section;
 			// std::optional<std::string> unit_input_scattering_cross_section;
 			// std::optional<std::string> unit_input_scattering_spectral;
@@ -587,6 +612,7 @@ class Configuration
 			std::vector<std::string> diluent_species;
 			std::vector<double> diluent_ratio;
 			std::optional<std::string> filename_hitran;
+			bool is_hitran;
 			
 			std::optional<VerticalTemperatureProfile> vertical_temperature_profile;
 			std::vector<std::vector<double>> temperature_profile; //m, K
@@ -625,6 +651,18 @@ class Configuration
 		// bool is_wavenumber;
 
 		void validateConfiguration(void);
+};
+
+struct SimulationInformation
+{
+	public:
+		std::string simulation_name;
+		std::string directory_name;
+		std::string result_name;
+		std::string logfile_name;
+
+		int n_scattering_angle;
+		int n_parallel;
 };
 
 struct SpectralInformation
@@ -723,6 +761,8 @@ struct RadiativeTransferResult
 		std::vector<double> number_density; // altitude
 
 		std::vector<MonochromeData> spectral_data;
+		std::vector<double> spectral_grid;
+		SpectralCoordinateDimension spectral_dimenstion;
 };
 
 class RadiativeTransferSolver
@@ -732,11 +772,12 @@ class RadiativeTransferSolver
 		DeltaApproximation delta_approximation_;
 		
 		double initial_optical_thickness_;
+		int n_scattering_angle_;
 
 		RadiativeLayer initializeAtmosphericLayer_(const OpticalLayer&);
 		RadiativeLayer initializeSurfaceLayer_(const OpticalLayer&);
 
-		std::vector<OpticalLayer> setAtmosphericLayerCondition_(const AtmosphereModel&, double, SpectralCoordinateDimension, int);
+		std::vector<OpticalLayer> setAtmosphericLayerCondition_(const AtmosphereModel&, double, SpectralCoordinateDimension);
 		OpticalLayer setSurfaceLayerCondition_(const AtmosphereModel&, double, SpectralCoordinateDimension);
 
 		void computeDeltaApproximation_(OpticalLayer&);
@@ -748,7 +789,7 @@ class RadiativeTransferSolver
 		void geometry(const Geometry&); // setter
 		void delta_approximation(const DeltaApproximation&); // setter
 
-		MonochromeData computeMonochrome(const AtmosphereModel&, double, SpectralCoordinateDimension, double);
+		MonochromeData computeMonochrome(const AtmosphereModel&, double, SpectralCoordinateDimension, double, int);
 		std::vector<std::vector<std::vector<double>>> reconstruct(const std::vector<std::vector<std::vector<std::vector<double>>>>&);
 		// void reconstructOpticalProperties(RadiativeLayer&);
 		std::vector<std::vector<Eigen::MatrixXd>> computeFourierSeriesCoefficients(const std::vector<std::vector<std::vector<double>>>&);
@@ -762,6 +803,7 @@ class ModelBuilder
 		static Geometry buildGeometry(const Configuration&);
 		static SpectralInformation buildSpectral(const Configuration&);
 		static DeltaApproximation buildDeltaApproximation(const Configuration&);
+		static SimulationInformation buildSimulation(const Configuration&);
 
 	private:
 		static std::vector<Species> buildSpecies_(const Configuration&, const AtmosphereModel&, const SpectralInformation&);
@@ -772,6 +814,7 @@ class RadiativeTransfer
 {
 	private:
 		Configuration configuration_;
+		SimulationInformation simulation_;
 		AtmosphereModel atmosphere_model_;
 		RadiativeTransferSolver radiative_transfer_solver_;
 		SpectralInformation spectral_;

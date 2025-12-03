@@ -19,12 +19,12 @@ namespace radiative_transfer
 
 inline void RadiativeTransfer::exportResultNetCDF(void)
 {
-	std::string filename = configuration_.simulation.directory_name.value() + configuration_.simulation.result_name.value();
+	std::string filename = simulation_.directory_name + simulation_.result_name;
 
 	netCDF::NcFile outputFile(filename, netCDF::NcFile::replace);
 
 	//Simulation configuration
-	outputFile.putAtt("simulation_name", configuration_.simulation.simulation_name.value());
+	outputFile.putAtt("simulation_name", simulation_.simulation_name);
 
 	// 次元の定義
 	int Ntheta = geometry_.Ntheta;
@@ -86,6 +86,7 @@ inline void RadiativeTransfer::exportResultNetCDF(void)
 	if(spectral_.spectral_dimension == SpectralCoordinateDimension::Wavenumber)
 	{
 		var_spectral = outputFile.addVar("wavenumber", netCDF::ncDouble, dim_spectral);
+		var_spectral.setCompression(true, true, 5);
 		var_spectral.putAtt("long_name", "wavenumber");
 		var_spectral.putAtt("units", "m-1");
 		var_spectral.putVar(spectral_.spectral_grid.data());
@@ -93,12 +94,11 @@ inline void RadiativeTransfer::exportResultNetCDF(void)
 	else if(spectral_.spectral_dimension == SpectralCoordinateDimension::Wavelength)
 	{
 		var_spectral = outputFile.addVar("wavelength", netCDF::ncDouble, dim_spectral);
+		var_spectral.setCompression(true, true, 5);
 		var_spectral.putAtt("long_name", "wavelength");
 		var_spectral.putAtt("units", "m");
 		var_spectral.putVar(spectral_.spectral_grid.data());
 	}
-	
-	var_spectral.setCompression(true, true, 5);
 	
 	std::vector<double> reflectance_flat(Nspectral * Ntheta * Ntheta * Nphi);
 
@@ -186,7 +186,7 @@ inline void RadiativeTransfer::exportResultNetCDF(void)
 		}
 	}
 
-	// std::cout << "thru" << std::endl;
+	
 
 	netCDF::NcVar var_z = outputFile.addVar("altitude", netCDF::ncDouble, dim_layer);
 	var_z.putAtt("long_name", "altitude of center of layer");

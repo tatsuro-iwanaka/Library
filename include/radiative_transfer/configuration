@@ -22,12 +22,19 @@ inline Configuration ConfigurationLoader::load(const std::string& filename)
 	auto kv = importYaml_(filename);
 
 	configuration.simulation = loadSimulation_(kv);
+	// std::cout << "Simulation imported." << std::endl;
 	configuration.spectral_coordinate = loadSpectralCoordinate_(kv);
-	configuration.geometry = loadGeometry_(kv);
-	configuration.delta_m = loadDeltaM_(kv);
-	configuration.surface = loadSurface_(kv);
-	configuration.atmosphere = loadAtmosphere_(kv);
+	// std::cout << "Spectral imported." << std::endl;
 	configuration.instrument = loadInstrument_(kv);
+	// std::cout << "Instrument imported." << std::endl;
+	configuration.geometry = loadGeometry_(kv);
+	// std::cout << "Geometry imported." << std::endl;
+	configuration.delta_m = loadDeltaM_(kv);
+	// std::cout << "Delta-M imported." << std::endl;
+	configuration.surface = loadSurface_(kv);
+	// std::cout << "Surface imported." << std::endl;
+	configuration.atmosphere = loadAtmosphere_(kv);
+	// std::cout << "Atmosphere imported." << std::endl;
 
 	return configuration;
 }
@@ -206,7 +213,6 @@ inline std::map<std::string, std::string> ConfigurationLoader::importYaml_(const
 	return kv;
 }
 
-
 inline Configuration::Simulation ConfigurationLoader::loadSimulation_(const std::map<std::string, std::string>& kv)
 {
 	Configuration::Simulation simulation;
@@ -295,7 +301,6 @@ inline Configuration::Surface ConfigurationLoader::loadSurface_(const std::map<s
 	return surface;
 }
 
-// 要修正：netcdf対応
 inline Configuration::Atmosphere ConfigurationLoader::loadAtmosphere_(const std::map<std::string, std::string>& kv)
 {
 	Configuration::Atmosphere atmosphere;
@@ -323,10 +328,10 @@ inline Configuration::Atmosphere ConfigurationLoader::loadAtmosphere_(const std:
 	{
 		std::string base = prefix + "temperature.";
 
-		atmosphere.is_same_temperature_layering_atmosphere = !hasKey_(kv, base + "table.0.1"); // tableがlayer*2でなければzのレイヤリングとは異なる
+		atmosphere.is_same_temperature_layering_atmosphere = hasKey_(kv, base + "table.0") && !hasKey_(kv, base + "table.0.1"); // tableがlayer*2でなければzのレイヤリングとは異なる
 		atmosphere.vertical_temperature_profile = parseEnum_(getOptionalString_(kv, base + "vertical_profile"), map_vertical_temperature_profile);
 		atmosphere.vertical_temperature_interpolation = parseEnum_(getOptionalString_(kv, base + "interpolation"), map_vertical_profile_interpolation);
-		
+		// std::cout << atmosphere.is_same_temperature_layering_atmosphere << std::endl;
 		int n_tics = countArrayEntries_(kv, base + "table");
 
 		if(atmosphere.is_same_temperature_layering_atmosphere)
@@ -336,6 +341,7 @@ inline Configuration::Atmosphere ConfigurationLoader::loadAtmosphere_(const std:
 			for(int i = 0; i < n_tics; i ++)
 			{
 				atmosphere.temperature_profile.push_back({getRequiredDouble_(kv, base + "table." + std::to_string(i))});
+				// std::cout << atmosphere.temperature_profile[atmosphere.temperature_profile.size() - 1][0] << std::endl;
 			}
 
 		}
@@ -353,7 +359,7 @@ inline Configuration::Atmosphere ConfigurationLoader::loadAtmosphere_(const std:
 	{
 		std::string base = prefix + "pressure.";
 
-		atmosphere.is_same_pressure_layering_atmosphere = !hasKey_(kv, base + "table.0.1"); // tableがlayer*2でなければzのレイヤリングとは異なる
+		atmosphere.is_same_pressure_layering_atmosphere = hasKey_(kv, base + "table.0") && !hasKey_(kv, base + "table.0.1"); // tableがlayer*2でなければzのレイヤリングとは異なる
 		atmosphere.vertical_pressure_profile = parseEnum_(getOptionalString_(kv, base + "vertical_profile"), map_vertical_pressure_profile);
 		atmosphere.vertical_pressure_interpolation = parseEnum_(getOptionalString_(kv, base + "interpolation"), map_vertical_profile_interpolation);
 		
@@ -383,7 +389,7 @@ inline Configuration::Atmosphere ConfigurationLoader::loadAtmosphere_(const std:
 	{
 		std::string base = prefix + "number_density.";
 
-		atmosphere.is_same_number_density_layering_atmosphere = !hasKey_(kv, base + "table.0.1"); // tableがlayer*2でなければzのレイヤリングとは異なる
+		atmosphere.is_same_number_density_layering_atmosphere = hasKey_(kv, base + "table.0") && !hasKey_(kv, base + "table.0.1"); // tableがlayer*2でなければzのレイヤリングとは異なる
 		atmosphere.vertical_number_density_profile = parseEnum_(getOptionalString_(kv, base + "vertical_profile"), map_vertical_number_density_profile);
 		atmosphere.vertical_number_density_interpolation = parseEnum_(getOptionalString_(kv, base + "interpolation"), map_vertical_profile_interpolation);
 		
@@ -480,12 +486,14 @@ inline Configuration::Atmosphere ConfigurationLoader::loadAtmosphere_(const std:
 
 			s.filename_scattering_cross_section = getOptionalString_(kv, base + "scattering_cross_section.file.filename");
 			s.varname_scattering_cross_section_spectral = getOptionalString_(kv, base + "scattering_cross_section.file.varname.0");
-			s.varname_scattering_cross_section = getOptionalString_(kv, base + "scattering_cross_section.file.varname.1");
+			s.varname_scattering_cross_section_temperature = getOptionalString_(kv, base + "scattering_cross_section.file.varname.1");
+			s.varname_scattering_cross_section = getOptionalString_(kv, base + "scattering_cross_section.file.varname.2");
 			// s.unit_input_scattering_spectral = getOptionalString_(kv, base + "scattering_cross_section.unit.0");
 			// s.unit_input_scattering_cross_section = getOptionalString_(kv, base + "scattering_cross_section.unit.1");
-			s.filename_absorption_cross_section = getOptionalString_(kv, base + "absorption_cross_section.file");
+			s.filename_absorption_cross_section = getOptionalString_(kv, base + "absorption_cross_section.file.filename");
 			s.varname_absorption_cross_section_spectral = getOptionalString_(kv, base + "absorption_cross_section.file.varname.0");
-			s.varname_absorption_cross_section = getOptionalString_(kv, base + "absorption_cross_section.file.varname.1");
+			s.varname_absorption_cross_section_temperature = getOptionalString_(kv, base + "absorption_cross_section.file.varname.1");
+			s.varname_absorption_cross_section = getOptionalString_(kv, base + "absorption_cross_section.file.varname.2");
 			// s.unit_input_absorption_spectral = getOptionalString_(kv, base + "absorption_cross_section.unit.0");
 			// s.unit_input_absorption_cross_section = getOptionalString_(kv, base + "absorption_cross_section.unit.1");
 
@@ -493,21 +501,38 @@ inline Configuration::Atmosphere ConfigurationLoader::loadAtmosphere_(const std:
 
 			// hitran
 			s.molecule_id = getOptionalInt_(kv, base + "molecule_id");
-			s.isotopologue_type = parseEnum_(getOptionalString_(kv, base + "isotopologue.type"), map_isotopologue_type);
-			s.isotopologue_abundance_type = parseEnum_(getOptionalString_(kv, base + "isotopologue.abundance"), map_isotopologue_abundance_type);
-			int n_iso = countArrayEntries_(kv, base + "isotopologues.local_id");
-			for(int j = 0; j < n_iso; j ++)
+			
+			if(hasKey_(kv, base + "isotopologues.local_id.0"))
 			{
-				s.local_isotopologue_id.push_back(getRequiredInt_(kv, base + "isotopologues.local_id." + std::to_string(j)));
+				s.isotopologue_type = IsotopologueType::Defined;
+
+				int n_iso = countArrayEntries_(kv, base + "isotopologues.local_id");
+				for(int j = 0; j < n_iso; j ++)
+				{
+					s.local_isotopologue_id.push_back(getRequiredInt_(kv, base + "isotopologues.local_id." + std::to_string(j)));
+				}
+			}
+			else
+			{
+				s.isotopologue_type = parseEnum_(getOptionalString_(kv, base + "isotopologues.local_id"), map_isotopologue_type);
 			}
 
-			n_iso = countArrayEntries_(kv, base + "isotopologues.abundance");
-			for(int j = 0; j < n_iso; j ++)
+			if(hasKey_(kv, base + "isotopologues.abundance.0"))
 			{
-				s.abundance.push_back(getRequiredDouble_(kv, base + "isotopologues.abundance." + std::to_string(j)));
+				s.isotopologue_abundance_type = IsotopologueAbundanceType::Defined;
+
+				int n_iso = countArrayEntries_(kv, base + "isotopologues.abundance");
+				for(int j = 0; j < n_iso; j ++)
+				{
+					s.abundance.push_back(getRequiredDouble_(kv, base + "isotopologues.abundance." + std::to_string(j)));
+				}
+			}
+			else
+			{
+				s.isotopologue_abundance_type = parseEnum_(getOptionalString_(kv, base + "isotopologues.abundance"), map_isotopologue_abundance_type);
 			}
 
-			n_iso = countArrayEntries_(kv, base + "isotopologues.scalar");
+			int n_iso = countArrayEntries_(kv, base + "isotopologues.scalar");
 			for(int j = 0; j < n_iso; j ++)
 			{
 				s.scalar.push_back(getRequiredDouble_(kv, base + "isotopologues.scalar." + std::to_string(j)));
@@ -630,7 +655,6 @@ inline Configuration::Atmosphere ConfigurationLoader::loadAtmosphere_(const std:
 	return atmosphere;
 }
 
-// 要修正：netcdf対応
 inline Configuration::Instrument ConfigurationLoader::loadInstrument_(const std::map<std::string, std::string>& kv)
 {
 	Configuration::Instrument instrument;
@@ -663,7 +687,7 @@ inline Configuration::Instrument ConfigurationLoader::loadInstrument_(const std:
 	//   n_sample: 5
 	//   
 
-	std::string prefix = "simulation.bandpass_filter.";
+	std::string prefix = "simulation.convolution_kernel.";
 
 	instrument.convolution_kernel_type = parseEnum_(getOptionalString_(kv, prefix + "type"), map_instrument_function_type);
 	instrument.kernel_sigma = getOptionalDouble_(kv, prefix + "sigma");
@@ -671,7 +695,7 @@ inline Configuration::Instrument ConfigurationLoader::loadInstrument_(const std:
 	instrument.over_sampling_count = getOptionalInt_(kv, prefix + "n_sample");
 	instrument.kernel_cut_off_sigma = getOptionalDouble_(kv, prefix + "cutoff_sigma");
 
-	prefix = "simulation.convolution_kernel";
+	prefix = "simulation.bandpass_filter.";
 
 	instrument.filter_function_type = parseEnum_(getOptionalString_(kv, prefix + "type"), map_instrument_function_type);
 	instrument.filter_sigma = getOptionalDouble_(kv, prefix + "sigma");
@@ -982,6 +1006,15 @@ inline void Configuration::validateConfiguration(void)
 		simulation.n_parallel = 1;
 		std::cout << "[Configuration::validateConfiguration] n_parallel was not specified. Automatically set to 1." << std::endl;
 	}
+	else
+	{
+		int max_threads = omp_get_max_threads();
+		if(simulation.n_parallel.value() > max_threads)
+		{
+			simulation.n_parallel = max_threads;
+			std::cout << "[Configuration::validateConfiguration] n_parallel exceeds max_threads. Automatically set to " << max_threads << "." << std::endl;
+		}
+	}
 	if(!simulation.n_scattering_angle.has_value())
 	{
 		simulation.n_scattering_angle = 1001;
@@ -1019,13 +1052,21 @@ inline void Configuration::validateConfiguration(void)
 		delta_m.delta_approximation_type = DeltaApproximationType::Disable;
 		std::cout << "[Configuration::validateConfiguration] delta_approximation_type was not specified. Automatically set to disable." << std::endl;
 	}
-	else 
+	else
 	{
-		// to be fixed
-		if(!delta_m.n_icss_sample.has_value())
+		if(delta_m.delta_approximation_type.value() == DeltaApproximationType::Cumulative)
 		{
-			delta_m.n_icss_sample = 3;
-			std::cout << "[Configuration::validateConfiguration] n_icss_sample was not specified. Automatically set to 3." << std::endl;
+			if(!delta_m.f_target.has_value())
+			{
+				throw std::runtime_error("[Configuration::validateConfiguration] f_target was not specified.");
+			}
+		}
+		else if(delta_m.delta_approximation_type.value() == DeltaApproximationType::FWHM)
+		{
+			if(!delta_m.fwhm_ratio.has_value())
+			{
+				throw std::runtime_error("[Configuration::validateConfiguration] fwhm_ratio was not specified.");
+			}
 		}
 	}
 
@@ -1287,6 +1328,10 @@ inline void Configuration::validateConfiguration(void)
 				{
 					throw std::runtime_error("[Configuration::validateConfiguration] Invalid temperature unit dimension.");
 				}
+				else
+				{
+					atmosphere.temperature_unit = {atmosphere.z_unit.value(), atmosphere.temperature_unit[0].value()};
+				}
 			}
 			else
 			{
@@ -1337,7 +1382,7 @@ inline void Configuration::validateConfiguration(void)
 	else if(atmosphere.vertical_temperature_profile.value() == VerticalTemperatureProfile::VIRA_EQUATOR || atmosphere.vertical_temperature_profile.value() == VerticalTemperatureProfile::VIRA_45 || atmosphere.vertical_temperature_profile.value() == VerticalTemperatureProfile::VIRA_60)
 	{
 		atmosphere.temperature_unit = {"km", "K"};
-		std::cout << "[Configuration::validateConfiguration] (z, temperature) unit automatically set (km, K) for VIRA." << std::endl;
+		// std::cout << "[Configuration::validateConfiguration] (z, temperature) unit automatically set (km, K) for VIRA." << std::endl;
 
 		if(!atmosphere.vertical_temperature_interpolation.has_value())
 		{
@@ -1373,6 +1418,10 @@ inline void Configuration::validateConfiguration(void)
 				if(getUnitInfo(atmosphere.pressure_unit[0].value()).dim != UnitDim::Pressure)
 				{
 					throw std::runtime_error("[Configuration::validateConfiguration] Invalid pressure unit dimension.");
+				}
+				else
+				{
+					atmosphere.pressure_unit = {atmosphere.z_unit.value(), atmosphere.pressure_unit[0].value()};
 				}
 			}
 			else
@@ -1425,7 +1474,7 @@ inline void Configuration::validateConfiguration(void)
 	else if(atmosphere.vertical_pressure_profile.value() == VerticalPressureProfile::VIRA_EQUATOR || atmosphere.vertical_pressure_profile.value() == VerticalPressureProfile::VIRA_45 || atmosphere.vertical_pressure_profile.value() == VerticalPressureProfile::VIRA_60)
 	{
 		atmosphere.pressure_unit = {"km", "bar"};
-		std::cout << "[Configuration::validateConfiguration] (z, pressure) unit automatically set (km, bar) for VIRA." << std::endl;
+		// std::cout << "[Configuration::validateConfiguration] (z, pressure) unit automatically set (km, bar) for VIRA." << std::endl;
 
 		if(!atmosphere.vertical_pressure_interpolation.has_value())
 		{
@@ -1458,6 +1507,8 @@ inline void Configuration::validateConfiguration(void)
 			if(atmosphere.number_density_unit.size() == 0)
 			{
 				atmosphere.number_density_unit = {atmosphere.z_unit.value(), "m-3"};
+				atmosphere.unit_dim_number_density = getUnitInfo(atmosphere.number_density_unit[1].value()).dim;
+				
 				std::cout << "[Configuration::validateConfiguration] NumberDensity unit was not specified. Automatically set to m-3." << std::endl;
 			}
 			else if(atmosphere.number_density_unit.size() == 1)
@@ -1465,6 +1516,11 @@ inline void Configuration::validateConfiguration(void)
 				if(getUnitInfo(atmosphere.number_density_unit[0].value()).dim != UnitDim::NumberDensity && getUnitInfo(atmosphere.number_density_unit[0].value()).dim != UnitDim::ColumnNumberDensity)
 				{
 					throw std::runtime_error("[Configuration::validateConfiguration] Invalid number_density unit dimension.");
+				}
+				else
+				{
+					atmosphere.number_density_unit = {atmosphere.z_unit.value(), atmosphere.number_density_unit[0].value()};
+					atmosphere.unit_dim_number_density = getUnitInfo(atmosphere.number_density_unit[1].value()).dim;
 				}
 			}
 			else
@@ -1497,6 +1553,7 @@ inline void Configuration::validateConfiguration(void)
 			if(atmosphere.number_density_unit.size() == 0)
 			{
 				atmosphere.number_density_unit = {atmosphere.z_unit.value(), "m-3"};
+				atmosphere.unit_dim_number_density = getUnitInfo(atmosphere.number_density_unit[1].value()).dim;
 				std::cout << "[Configuration::validateConfiguration] (z, number_density) unit was not specified. Automatically set to (" << atmosphere.z_unit.value() << ", m-3)." << std::endl;
 			}
 			else if(atmosphere.number_density_unit.size() == 1)
@@ -1504,11 +1561,13 @@ inline void Configuration::validateConfiguration(void)
 				if(getUnitInfo(atmosphere.number_density_unit[0].value()).dim == UnitDim::Length)
 				{
 					atmosphere.number_density_unit.push_back(std::optional<std::string>("m-3"));
+					atmosphere.unit_dim_number_density = getUnitInfo(atmosphere.number_density_unit[1].value()).dim;
 					std::cout << "[Configuration::validateConfiguration] Number density unit was not specified. Automatically set to m-3." << std::endl;
 				}
 				else if(getUnitInfo(atmosphere.number_density_unit[0].value()).dim == UnitDim::NumberDensity)
 				{
 					atmosphere.number_density_unit.insert(atmosphere.number_density_unit.begin(), atmosphere.z_unit);
+					atmosphere.unit_dim_number_density = getUnitInfo(atmosphere.number_density_unit[1].value()).dim;
 					std::cout << "[Configuration::validateConfiguration] z_unit for number_density was not specified. Automatically set to m." << std::endl;
 				}
 			}
@@ -1517,7 +1576,8 @@ inline void Configuration::validateConfiguration(void)
 	else if(atmosphere.vertical_number_density_profile.value() == VerticalNumberDensityProfile::VIRA_EQUATOR || atmosphere.vertical_number_density_profile.value() == VerticalNumberDensityProfile::VIRA_45 || atmosphere.vertical_number_density_profile.value() == VerticalNumberDensityProfile::VIRA_60)
 	{
 		atmosphere.number_density_unit = {"km", "m-3"};
-		std::cout << "[Configuration::validateConfiguration] (z, number_density) unit automatically set (km, m-3) for VIRA." << std::endl;
+		atmosphere.unit_dim_number_density = getUnitInfo(atmosphere.number_density_unit[1].value()).dim;
+		// std::cout << "[Configuration::validateConfiguration] (z, number_density) unit automatically set (km, m-3) for VIRA." << std::endl;
 
 		if(!atmosphere.vertical_number_density_interpolation.has_value())
 		{
@@ -1557,7 +1617,7 @@ inline void Configuration::validateConfiguration(void)
 			{
 				atmosphere.species_configuration[i].unit_vertical_profile.insert(atmosphere.species_configuration[i].unit_vertical_profile.begin(), atmosphere.z_unit);
 				
-				if(getUnitInfo(atmosphere.species_configuration[i].unit_vertical_profile[0].value()).dim != UnitDim::Dimensionless && getUnitInfo(atmosphere.species_configuration[i].unit_vertical_profile[0].value()).dim != UnitDim::NumberDensity && getUnitInfo(atmosphere.species_configuration[i].unit_vertical_profile[0].value()).dim != UnitDim::ColumnNumberDensity)
+				if(getUnitInfo(atmosphere.species_configuration[i].unit_vertical_profile[1].value()).dim != UnitDim::Dimensionless && getUnitInfo(atmosphere.species_configuration[i].unit_vertical_profile[1].value()).dim != UnitDim::NumberDensity && getUnitInfo(atmosphere.species_configuration[i].unit_vertical_profile[1].value()).dim != UnitDim::ColumnNumberDensity)
 				{
 					throw std::runtime_error("[Configuration::validateConfiguration] Invalid vertical profile unit dimension for species " + std::to_string(i) + ".");
 				}
@@ -1624,11 +1684,6 @@ inline void Configuration::validateConfiguration(void)
 		// 物性の整合性検証
 		if(atmosphere.species_configuration[i].species_state.value() == SpeciesState::Molecule)
 		{
-			if(atmosphere.species_configuration[i].scatter_type.value() == ScatterType::Mie)
-			{
-				throw std::runtime_error("[Configuration::validateConfiguration] Mie scattering is not supported for molecules for species "+ std::to_string(i) + ".");
-			}
-
 			if(atmosphere.species_configuration[i].species_type.value() == SpeciesType::Scatterer || atmosphere.species_configuration[i].species_type.value() == SpeciesType::Extinction)
 			{
 				if(!atmosphere.species_configuration[i].scatter_type.has_value())
@@ -1655,7 +1710,7 @@ inline void Configuration::validateConfiguration(void)
 					}
 					else if(atmosphere.species_configuration[i].scattering_cross_section_type == CrossSectionType::External)
 					{
-						if(!atmosphere.species_configuration[i].varname_scattering_cross_section_spectral.has_value() || !atmosphere.species_configuration[i].varname_scattering_cross_section.has_value())
+						if(!atmosphere.species_configuration[i].varname_scattering_cross_section_spectral.has_value() || !atmosphere.species_configuration[i].varname_scattering_cross_section_temperature.has_value() || !atmosphere.species_configuration[i].varname_scattering_cross_section.has_value())
 						{
 							throw std::runtime_error("[Configuration::validateConfiguration] Variable name of scattering cross section file for species "+ std::to_string(i) + " was not specified.");
 						}
@@ -1672,6 +1727,10 @@ inline void Configuration::validateConfiguration(void)
 							throw std::runtime_error("[Configuration::validateConfiguration] g_factor for species "+ std::to_string(i) + " was not specified.");
 						}
 					}
+				}
+				else if(atmosphere.species_configuration[i].scatter_type.value() == ScatterType::Mie)
+				{
+					throw std::runtime_error("[Configuration::validateConfiguration] Mie scattering is not supported for molecules for species "+ std::to_string(i) + ". Use aerosol instead.");
 				}
 			}
 
@@ -1695,7 +1754,7 @@ inline void Configuration::validateConfiguration(void)
 				}
 				else if(atmosphere.species_configuration[i].absorption_cross_section_type == CrossSectionType::External)
 				{
-					if(!atmosphere.species_configuration[i].varname_absorption_cross_section_spectral.has_value() || !atmosphere.species_configuration[i].varname_absorption_cross_section.has_value())
+					if(!atmosphere.species_configuration[i].varname_absorption_cross_section_spectral.has_value() || !atmosphere.species_configuration[i].varname_absorption_cross_section_temperature.has_value() || !atmosphere.species_configuration[i].varname_absorption_cross_section.has_value())
 						{
 							throw std::runtime_error("[Configuration::validateConfiguration] Variable name of absorption cross section file for species "+ std::to_string(i) + " was not specified.");
 						}
@@ -1719,7 +1778,12 @@ inline void Configuration::validateConfiguration(void)
 
 					if(!atmosphere.species_configuration[i].isotopologue_type.has_value())
 					{
-						throw std::runtime_error("[Configuration::validateConfiguration] isotopologue_type for species " + std::to_string(i) + " was not specified.");
+						atmosphere.species_configuration[i].isotopologue_type = IsotopologueType::All;
+						atmosphere.species_configuration[i].isotopologue_abundance_type = IsotopologueAbundanceType::HITRAN;
+						atmosphere.species_configuration[i].is_normalize = false;
+						std::cout << "[Configuration::validateConfiguration] isotopologue_type for species " + std::to_string(i) + " was not specified. Automatically set to HITRAN." << std::endl;
+
+						// throw std::runtime_error("[Configuration::validateConfiguration] isotopologue_type for species " + std::to_string(i) + " was not specified.");
 					}
 					else if(atmosphere.species_configuration[i].isotopologue_type.value() == IsotopologueType::Defined)
 					{
@@ -1742,7 +1806,7 @@ inline void Configuration::validateConfiguration(void)
 					{
 						if(!atmosphere.species_configuration[i].local_isotopologue_id.empty())
 						{
-							throw std::runtime_error("[Configuration::validateConfiguration] local_isotopologue_id for species " + std::to_string(i) + " was ignored.");
+							throw std::runtime_error("[Configuration::validateConfiguration] local_isotopologue_id for species " + std::to_string(i) + " was overspecified.");
 						}
 					}
 
@@ -1750,7 +1814,7 @@ inline void Configuration::validateConfiguration(void)
 					{
 						throw std::runtime_error("[Configuration::validateConfiguration] isotopologue_abundance_type for species " + std::to_string(i) + " was not specified.");
 					}
-					else if(atmosphere.species_configuration[i].isotopologue_abundance_type == IsotopologueAbundanceType::Defined)
+					else if(atmosphere.species_configuration[i].isotopologue_abundance_type.value() == IsotopologueAbundanceType::Defined)
 					{
 						if(atmosphere.species_configuration[i].abundance.empty())
 						{
@@ -1771,11 +1835,11 @@ inline void Configuration::validateConfiguration(void)
 							}
 						}
 					}
-					else if(atmosphere.species_configuration[i].isotopologue_abundance_type == IsotopologueAbundanceType::HITRAN)
+					else if(atmosphere.species_configuration[i].isotopologue_abundance_type.value() == IsotopologueAbundanceType::HITRAN)
 					{
-						if(atmosphere.species_configuration[i].abundance.empty())
+						if(!atmosphere.species_configuration[i].abundance.empty())
 						{
-							throw std::runtime_error("[Configuration::validateConfiguration] isotopologue abundance for species "+ std::to_string(i) + " was not specified.");
+							throw std::runtime_error("[Configuration::validateConfiguration] isotopologue abundance for species "+ std::to_string(i) + " was overspecified.");
 						}
 					}
 

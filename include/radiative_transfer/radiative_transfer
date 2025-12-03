@@ -49,9 +49,10 @@ inline void RadiativeTransferSolver::delta_approximation(const DeltaApproximatio
 	delta_approximation_ = delta_approximation_input;
 }
 
-inline MonochromeData RadiativeTransferSolver::computeMonochrome(const AtmosphereModel& atmosphere_model, double spectral, SpectralCoordinateDimension dimension, double initial_optical_thickness = 1.0E-6)
+inline MonochromeData RadiativeTransferSolver::computeMonochrome(const AtmosphereModel& atmosphere_model, double spectral, SpectralCoordinateDimension dimension, double initial_optical_thickness = 1.0E-6, int n_scattering_angle = 1001)
 {
 	initial_optical_thickness_ = initial_optical_thickness;
+	n_scattering_angle_ = n_scattering_angle;
 
 	double wavelength;
 	double wavenumber;
@@ -71,26 +72,38 @@ inline MonochromeData RadiativeTransferSolver::computeMonochrome(const Atmospher
 		throw std::runtime_error("[RadiativeTransferCalculator::computeMonochrome] Frequency calculation is not currently supported.");
 	}
 
+	// std::cout << "thru" << std::endl;
+
 	int n_layer = atmosphere_model.altitude.size();
-	OpticalLayer surface_layer_opt;
-	RadiativeLayer surface_layer_rad;
-	std::vector<OpticalLayer> atmosphere_layer_opt(n_layer);
+	// OpticalLayer surface_layer_opt;
+	
+	// std::vector<OpticalLayer> atmosphere_layer_opt(n_layer);
+	auto atmosphere_layer_opt = setAtmosphericLayerCondition_(atmosphere_model, spectral, dimension);
 	std::vector<RadiativeLayer> atmosphere_layer_rad(n_layer);
 	RadiativeLayer result_layer_rad;
 
 	MonochromeData result;
+	result.absorption_coefficient.resize(n_layer);
+	result.scattering_coefficient.resize(n_layer);
+	result.optical_thickness.resize(n_layer);
+	result.single_scattering_albedo.resize(n_layer);
+	result.asymmetry_parameter.resize(n_layer);
 
 	if(atmosphere_model.surface_type != SurfaceType::NoSurface)
 	{
-
-		surface_layer_rad = initializeSurfaceLayer_(surface_layer_opt);
-		result_layer_rad = surface_layer_rad;
+		auto surface_layer_opt = setSurfaceLayerCondition_(atmosphere_model, spectral, dimension);
+		// std::cout << surface_layer_opt.surface_albedo << std::endl;
+		result_layer_rad = initializeSurfaceLayer_(surface_layer_opt);
 	}
+
+	// std::cout << "thru" << std::endl;
 
 	for(int i = 0; i < n_layer; ++i)
 	{
+		// std::cout << "layer " << i << std::endl;
 		atmosphere_layer_rad[i] = initializeAtmosphericLayer_(atmosphere_layer_opt[i]);
 		computeDeltaApproximation_(atmosphere_layer_opt[i]);
+		// std::cout << "delta approx." << std::endl;
 
 		result.absorption_coefficient[i] = atmosphere_layer_opt[i].absorption_coefficient;
 		result.scattering_coefficient[i] = atmosphere_layer_opt[i].scattering_coefficient;
@@ -306,15 +319,24 @@ inline RadiativeTransfer::RadiativeTransfer(const std::string& config_filename)
 inline void RadiativeTransfer::loadConfiguration(void)
 {
 	configuration_ = ConfigurationLoader::load(config_filename_);
-
+	configuration_.validateConfiguration();
+	simulation_ = ModelBuilder::buildSimulation(configuration_);
+	// std::cout << "Configuration validation completed." << std::endl;
 	spectral_ = ModelBuilder::buildSpectral(configuration_);
+	// std::cout << "thru" << std::endl;
 	geometry_ = ModelBuilder::buildGeometry(configuration_);
+	// std::cout << "thru" << std::endl;
 	atmosphere_model_ = ModelBuilder::buildAtmosphereModel(configuration_, spectral_);
+	// std::cout << "thru" << std::endl;
 	delta_approximation_ = ModelBuilder::buildDeltaApproximation(configuration_);
-
+	// std::cout << "thru" << std::endl;
 	result_.Ntheta = geometry_.Ntheta;
 	result_.Nphi = geometry_.Nphi;
 	result_.Nmode = geometry_.M;
+
+	result_.theta_e.resize(geometry_.Ntheta);
+	result_.theta_i.resize(geometry_.Ntheta);
+	result_.phi.resize(geometry_.Nphi);
 
 	for(int i = 0; i < geometry_.Ntheta; ++i)
 	{
@@ -339,6 +361,7 @@ inline void RadiativeTransfer::loadConfiguration(void)
 	{
 		result_.physical_thickness[i] = result_.altitude_top[i] - result_.altitude_bottom[i];
 	}
+	// std::cout << "thru" << std::endl;
 
 	return;
 }
@@ -348,16 +371,27 @@ inline void RadiativeTransfer::run(void)
 	radiative_transfer_solver_.geometry(geometry_);
 	radiative_transfer_solver_.delta_approximation(delta_approximation_);
 	double initial_layer = configuration_.simulation.tau_initial_layer.value();
+
+	// std::cout << "thru" << std::endl;
 	
 	int n_spectral = spectral_.spectral_grid.size();
 	result_.spectral_data.resize(n_spectral);
 
+	// std::cout << n_spectral << std::endl;
+	#pragma omp parallel for num_threads(simulation_.n_parallel)
 	for(int i = 0; i < n_spectral; ++i)
 	{
 		double spectral = spectral_.spectral_grid[i];
+		
+		#pragma omp critical
+		{
+			std::cout << "[RadiativeTransfer::run] Computing " << spectral << (spectral_.spectral_dimension == SpectralCoordinateDimension::Wavelength ? " m" : " m-1") << std::endl;
+		}
 
-		result_.spectral_data[i] = radiative_transfer_solver_.computeMonochrome(atmosphere_model_, spectral, spectral_.spectral_dimension, initial_layer);
+		result_.spectral_data[i] = radiative_transfer_solver_.computeMonochrome(atmosphere_model_, spectral, spectral_.spectral_dimension, initial_layer, simulation_.n_scattering_angle);
 	}
+
+	// std::cout << "thru" << std::endl;
 
 	if(spectral_.spectral_coordinate_type == SpectralCoordinateType::Monochrome)
 	{
@@ -365,6 +399,7 @@ inline void RadiativeTransfer::run(void)
 	}
 	else if(spectral_.spectral_coordinate_type == SpectralCoordinateType::Spectrum)
 	{
+		// std::cout << spectral_.spectral_grid.size() << std::endl;
 		// 1. サイズとインデックスの準備
 		size_t n_kernel = spectral_.convolution_kernel.size();
 		int n_pad = (n_kernel - 1) / 2;
@@ -428,11 +463,15 @@ inline void RadiativeTransfer::run(void)
 
 		// 5. 結果の入れ替え (Move Semantics)
 		// 古い巨大データはここで破棄され、新しいデータに置き換わる
-		result_.spectral_data = std::move(convolved_data);
-		spectral_.spectral_grid = std::move(new_grid);
+		result_.spectral_data = convolved_data;
+		result_.spectral_grid = new_grid;
+		result_.spectral_dimenstion = spectral_.spectral_dimension;
+		spectral_.spectral_grid = new_grid;
 	}
 	else if(spectral_.spectral_coordinate_type == SpectralCoordinateType::Bandpass)
 	{
+		// std::cout << "thru" << std::endl;
+
 		int n_spectral = spectral_.spectral_grid.size();
 		int n_layer = atmosphere_model_.altitude.size();
 
@@ -497,6 +536,8 @@ inline void RadiativeTransfer::run(void)
 		}
 
 		result_.spectral_data = {data};
+		result_.spectral_grid = {spectral};
+		result_.spectral_dimenstion = spectral_.spectral_dimension;
 		spectral_.spectral_grid = {spectral};
 	}
 
