@@ -229,4 +229,5 @@ inline RadiativeLayer doubleLayer_adjoint(const RadiativeLayer &layer, const Geo
 
 	return adj_layer;
 }
+
 }
