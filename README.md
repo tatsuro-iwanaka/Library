@@ -1,10 +1,4 @@
 # Adjoint Adding-Doubling Radiative Transfer Model
-This repository contains a C++ implementation of the Adjoint Adding-Doubling Method for plane-parallel radiative transfer problems.
-Designed for inverse problems in planetary atmospheric science, this code computes the exact analytical gradients of the cost function with respect to atmospheric parameters.
-It utilizes the Eigen library for matrix operations.
-Supports both scattering and thermal emission.
-
-# Forward Adding-Doubling Method Implementation
 
 ## Overview
 This repository implements the **Adding-Doubling method** for radiative transfer calculations in a plane-parallel atmosphere. The core algorithm computes the reflection and transmission matrices of a combined layer by interacting two sub-layers.
