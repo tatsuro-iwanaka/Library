@@ -15,7 +15,7 @@ The code employs **Gauss-Radau quadrature** for discretizing the zenith angle $\
 The integral of a function $f(\mu)$ over $[0, 1]$ is approximated as:
 
 $$
-\int_0^1 f(\mu) d\mu \approx \sum_{i=1}^{n} w_i f(\mu_i)
+\int_0^1 f(\mu) \mu d\mu \approx \sum_{i=1}^{n} w_i f(\mu_i)
 $$
 
 where the last node is fixed at $\mu_n = 1.0$. This is particularly advantageous for radiative transfer problems where the radiation field at the vertical boundary ($\mu=1$) is of specific interest and should be calculated explicitly without extrapolation.
@@ -28,7 +28,7 @@ The nodes $x_i$ (in the standard interval $[-1, 1]$) and weights $w_i^{gr}$ are 
 3.  **Mapping**: The nodes and weights are linearly mapped from $[-1, 1]$ to the physical interval $[0, 1]$.
 
 $$
-\mu_i = \frac{x_i + 1}{2}, \quad w_i = \frac{w_i^{gr}}{2}
+\mu_i = \frac{x_i + 1}{2}, \quad w_i = \frac{\mu_i w_i^{gr}}{2}
 $$
 
 This method integrates polynomials of degree up to $2n-2$ exactly.
