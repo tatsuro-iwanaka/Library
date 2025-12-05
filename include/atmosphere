@@ -1309,13 +1309,10 @@ inline Geometry ModelBuilder::buildGeometry(const Configuration& configuration)
 	geometry.theta_uh = Eigen::VectorXd::Zero(geometry.Ntheta);
 	geometry.theta_lh = Eigen::VectorXd::Zero(geometry.Ntheta);
 	geometry.theta_all = Eigen::VectorXd::Zero(geometry.Ntheta * 2);
-	geometry.mu_uh = Eigen::VectorXd::Zero(geometry.Ntheta);
-	geometry.mu_lh = Eigen::VectorXd::Zero(geometry.Ntheta);
-	geometry.weight_uh = Eigen::VectorXd::Zero(geometry.Ntheta);
-	geometry.weight_lh = Eigen::VectorXd::Zero(geometry.Ntheta);
-
-	geometry.WMU_uh = Eigen::MatrixXd::Zero(geometry.Ntheta, geometry.Ntheta);
-	geometry.WMU_lh = Eigen::MatrixXd::Zero(geometry.Ntheta, geometry.Ntheta);
+	
+	geometry.weight = Eigen::VectorXd::Zero(geometry.Ntheta);
+	geometry.mu = Eigen::VectorXd::Zero(geometry.Ntheta);
+	geometry.WMU = Eigen::MatrixXd::Zero(geometry.Ntheta, geometry.Ntheta);
 
 	if(configuration.geometry.grid_type == GridType::Regular)
 	{
@@ -1327,8 +1324,7 @@ inline Geometry ModelBuilder::buildGeometry(const Configuration& configuration)
 		{	
 			geometry.theta_uh(i) = 0.0 + dtheta * double(i);
 			geometry.theta_lh(i) = PI - dtheta * double(i);
-			geometry.mu_uh(i) = std::abs(std::cos(geometry.theta_uh(i)));
-			geometry.mu_lh(i) = std::abs(std::cos(geometry.theta_lh(i)));
+			geometry.mu(i) = std::abs(std::cos(geometry.theta_uh(i)));
 
 			geometry.theta_all(i) = geometry.theta_uh(i);
 			geometry.theta_all(geometry.Ntheta * 2 - 1 - i) = geometry.theta_lh(i);
@@ -1341,35 +1337,29 @@ inline Geometry ModelBuilder::buildGeometry(const Configuration& configuration)
 			{
 				if(i == 0 || i == geometry.Ntheta - 3)
 				{
-					geometry.weight_uh(i) = 1.0 / 3.0 * dtheta * std::sin(geometry.theta_uh(i));
-					geometry.weight_lh(i) = 1.0 / 3.0 * dtheta * std::sin(geometry.theta_lh(i));
+					geometry.weight(i) = 1.0 / 3.0 * dtheta * std::sin(geometry.theta_uh(i));
 				}
 				else if(i % 2 == 1)
 				{
-					geometry.weight_uh(i) = 4.0 / 3.0 * dtheta * std::sin(geometry.theta_uh(i));
-					geometry.weight_lh(i) = 4.0 / 3.0 * dtheta * std::sin(geometry.theta_lh(i));
+					geometry.weight(i) = 4.0 / 3.0 * dtheta * std::sin(geometry.theta_uh(i));
 				}
 				else
 				{
-					geometry.weight_uh(i) = 2.0 / 3.0 * dtheta * std::sin(geometry.theta_uh(i));
-					geometry.weight_lh(i) = 2.0 / 3.0 * dtheta * std::sin(geometry.theta_lh(i));
+					geometry.weight(i) = 2.0 / 3.0 * dtheta * std::sin(geometry.theta_uh(i));
 				}
 			}
 
 			if(i == geometry.Ntheta - 3)
 			{
-				geometry.weight_uh(i) += ((1.0 / (6.0 * dtheta * dtheta)) * std::pow(2.0 * dtheta + eps, 3) - (3.0 / (4.0 * dtheta)) * std::pow(2.0 * dtheta + eps, 2) + (2.0 * dtheta + eps)) * std::sin(geometry.theta_uh(i));
-				geometry.weight_lh(i) += ((1.0 / (6.0 * dtheta * dtheta)) * std::pow(2.0 * dtheta + eps, 3) - (3.0 / (4.0 * dtheta)) * std::pow(2.0 * dtheta + eps, 2) + (2.0 * dtheta + eps)) * std::sin(geometry.theta_lh(i));
+				geometry.weight(i) += ((1.0 / (6.0 * dtheta * dtheta)) * std::pow(2.0 * dtheta + eps, 3) - (3.0 / (4.0 * dtheta)) * std::pow(2.0 * dtheta + eps, 2) + (2.0 * dtheta + eps)) * std::sin(geometry.theta_uh(i));
 			}
 			else if(i == geometry.Ntheta - 2)
 			{
-				geometry.weight_uh(i) = ((- 1.0 / (3.0 * dtheta * dtheta)) * std::pow(2.0 * dtheta + eps, 3) + (1.0 / dtheta) * std::pow(2.0 * dtheta + eps, 2)) * std::sin(geometry.theta_uh(i));
-				geometry.weight_lh(i) = ((- 1.0 / (3.0 * dtheta * dtheta)) * std::pow(2.0 * dtheta + eps, 3) + (1.0 / dtheta) * std::pow(2.0 * dtheta + eps, 2)) * std::sin(geometry.theta_lh(i));
+				geometry.weight(i) = ((- 1.0 / (3.0 * dtheta * dtheta)) * std::pow(2.0 * dtheta + eps, 3) + (1.0 / dtheta) * std::pow(2.0 * dtheta + eps, 2)) * std::sin(geometry.theta_uh(i));
 			}
 			else if(i == geometry.Ntheta - 1)
 			{
-				geometry.weight_uh(i) = ((1.0 / (6.0 * dtheta * dtheta)) * std::pow(2.0 * dtheta + eps, 3) - (1.0 / (4.0 * dtheta)) * std::pow(2.0 * dtheta + eps, 2)) * std::sin(geometry.theta_uh(i));
-				geometry.weight_lh(i) = ((1.0 / (6.0 * dtheta * dtheta)) * std::pow(2.0 * dtheta + eps, 3) - (1.0 / (4.0 * dtheta)) * std::pow(2.0 * dtheta + eps, 2)) * std::sin(geometry.theta_lh(i));
+				geometry.weight(i) = ((1.0 / (6.0 * dtheta * dtheta)) * std::pow(2.0 * dtheta + eps, 3) - (1.0 / (4.0 * dtheta)) * std::pow(2.0 * dtheta + eps, 2)) * std::sin(geometry.theta_uh(i));
 			}
 		}
 	}
@@ -1379,24 +1369,21 @@ inline Geometry ModelBuilder::buildGeometry(const Configuration& configuration)
 
 		for(int i = 0; i < node_weight.size(); i ++)
 		{
-			geometry.mu_uh(i) = node_weight[node_weight.size() - 1 - i][0];
-			geometry.mu_lh(i) = node_weight[node_weight.size() - 1 - i][0];
 			geometry.theta_uh(i) = std::acos(node_weight[node_weight.size() - 1 - i][0]);
 			geometry.theta_lh(i) = PI - std::acos(node_weight[node_weight.size() - 1 - i][0]);
 
 			geometry.theta_all(i) = geometry.theta_uh(i);
 			geometry.theta_all(geometry.Ntheta * 2 - 1 - i) = geometry.theta_lh(i);
 
-			geometry.weight_uh(i) = node_weight[node_weight.size() - 1 - i][1];
-			geometry.weight_lh(i) = node_weight[node_weight.size() - 1 - i][1];
+			geometry.mu(i) = node_weight[node_weight.size() - 1 - i][0];
+			geometry.weight(i) = node_weight[node_weight.size() - 1 - i][1];
 		}
 	}
 
 	// #pragma omp parallel for
 	for(int i = 0; i < geometry.Ntheta; i ++)
 	{
-		geometry.WMU_uh(i, i) = geometry.weight_uh(i) * geometry.mu_uh(i);
-		geometry.WMU_lh(i, i) = geometry.weight_lh(i) * geometry.mu_lh(i);
+		geometry.WMU(i, i) = geometry.weight(i) * geometry.mu(i);
 	}
 
 	return geometry;
@@ -2498,8 +2485,8 @@ inline RadiativeLayer RadiativeTransferSolver::initializeAtmosphericLayer_(const
 
 	for(int e_n = 0; e_n < geometry_.Ntheta; e_n ++)
 	{
-		radiative_layer.source_up(e_n) = (1.0 - optical_layer.single_scattering_albedo) * computeThermalEmission(optical_layer.planck_function, radiative_layer.optical_thickness, geometry_.mu_uh(e_n));
-		radiative_layer.source_down(e_n) = (1.0 - optical_layer.single_scattering_albedo) * computeThermalEmission(optical_layer.planck_function, radiative_layer.optical_thickness, geometry_.mu_lh(e_n));
+		radiative_layer.source_up(e_n) = (1.0 - optical_layer.single_scattering_albedo) * computeThermalEmission(optical_layer.planck_function, radiative_layer.optical_thickness, geometry_.mu(e_n));
+		radiative_layer.source_down(e_n) = (1.0 - optical_layer.single_scattering_albedo) * computeThermalEmission(optical_layer.planck_function, radiative_layer.optical_thickness, geometry_.mu(e_n));
 	}
 
 	std::vector<std::vector<std::vector<double>>> reflectance_top = std::vector<std::vector<std::vector<double>>>(geometry_.Ntheta, std::vector<std::vector<double>>(geometry_.Ntheta, std::vector<double>(geometry_.Nphi)));
@@ -2546,7 +2533,7 @@ inline RadiativeLayer RadiativeTransferSolver::initializeAtmosphericLayer_(const
 					}
 					else
 					{
-						reflectance_top[e][i][p] = optical_layer.single_scattering_albedo * radiative_layer.optical_thickness / (4.0 * geometry_.mu_lh(i) * geometry_.mu_uh(e)) * computePhaseFunction(optical_layer.scattering_phase_function, scattering_angle);
+						reflectance_top[e][i][p] = optical_layer.single_scattering_albedo * radiative_layer.optical_thickness / (4.0 * geometry_.mu(i) * geometry_.mu(e)) * computePhaseFunction(optical_layer.scattering_phase_function, scattering_angle);
 					}
 				}
 
@@ -2583,7 +2570,7 @@ inline RadiativeLayer RadiativeTransferSolver::initializeAtmosphericLayer_(const
 					}
 					else
 					{
-						reflectance_bottom[e][i][p] = optical_layer.single_scattering_albedo * radiative_layer.optical_thickness / (4.0 * geometry_.mu_uh(i) * geometry_.mu_lh(e)) * computePhaseFunction(optical_layer.scattering_phase_function, scattering_angle);
+						reflectance_bottom[e][i][p] = optical_layer.single_scattering_albedo * radiative_layer.optical_thickness / (4.0 * geometry_.mu(i) * geometry_.mu(e)) * computePhaseFunction(optical_layer.scattering_phase_function, scattering_angle);
 					}
 				}
 
@@ -2620,7 +2607,7 @@ inline RadiativeLayer RadiativeTransferSolver::initializeAtmosphericLayer_(const
 					}
 					else
 					{
-						transmittance_top[e][i][p] = optical_layer.single_scattering_albedo * radiative_layer.optical_thickness / (4.0 * geometry_.mu_lh(i) * geometry_.mu_lh(e)) * computePhaseFunction(optical_layer.scattering_phase_function, scattering_angle);
+						transmittance_top[e][i][p] = optical_layer.single_scattering_albedo * radiative_layer.optical_thickness / (4.0 * geometry_.mu(i) * geometry_.mu(e)) * computePhaseFunction(optical_layer.scattering_phase_function, scattering_angle);
 					}
 				}
 
@@ -2657,7 +2644,7 @@ inline RadiativeLayer RadiativeTransferSolver::initializeAtmosphericLayer_(const
 					}
 					else
 					{
-						transmittance_bottom[e][i][p] = optical_layer.single_scattering_albedo * radiative_layer.optical_thickness / (4.0 * geometry_.mu_uh(i) * geometry_.mu_uh(e)) * computePhaseFunction(optical_layer.scattering_phase_function, scattering_angle);
+						transmittance_bottom[e][i][p] = optical_layer.single_scattering_albedo * radiative_layer.optical_thickness / (4.0 * geometry_.mu(i) * geometry_.mu(e)) * computePhaseFunction(optical_layer.scattering_phase_function, scattering_angle);
 					}
 				}
 			}
@@ -2701,7 +2688,7 @@ inline RadiativeLayer RadiativeTransferSolver::initializeSurfaceLayer_(const Opt
 
 	radiative_layer.optical_thickness = 1.0E100;
 
-	double s = geometry_.WMU_lh.sum();
+	double s = geometry_.WMU.sum();
 
 	// #pragma omp parallel for
 	for(int e = 0; e < geometry_.Ntheta; e ++)

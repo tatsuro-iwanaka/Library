@@ -8,10 +8,11 @@
 #include<vector>
 #include<algorithm>
 
-#include"types"
-#include"constants"
-#include"utilities"
-#include"hitran"
+#include "types"
+#include "constants"
+#include "utilities"
+#include "hitran"
+#include <omp.h>
 
 namespace radiative_transfer
 {

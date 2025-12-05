@@ -398,19 +398,16 @@ struct Geometry //for Fourier-AD
 		int Nphi;
 
 		double d_phi;
-
-		Eigen::VectorXd weight_uh;
-		Eigen::VectorXd weight_lh;
+		
 		Eigen::VectorXd theta_uh;
 		Eigen::VectorXd theta_lh;
 		Eigen::VectorXd theta_all;
-		Eigen::VectorXd mu_uh;
-		Eigen::VectorXd mu_lh;
 
 		Eigen::VectorXd phi;
 
-		Eigen::MatrixXd WMU_uh;
-		Eigen::MatrixXd WMU_lh;
+		Eigen::VectorXd weight;
+		Eigen::VectorXd mu;
+		Eigen::MatrixXd WMU;
 };
 
 class Configuration
