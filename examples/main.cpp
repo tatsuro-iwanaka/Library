@@ -88,7 +88,7 @@ int main(void)
 	}
 	
 	std::vector<aad::core::RadiativeLayer> layers(n_layer);
-	auto geo = aad::core::generateGeometryGaussRadau(n_theta, n_theta * 4 - 1, (n_theta * 4 - 2 / 2));
+	auto geo = aad::core::generateGeometryGaussRadau(n_theta, n_theta * 4 - 1, (n_theta * 4 - 2) / 2);
 
 	for(int i = 0; i < layers.size(); ++i)
 	{
