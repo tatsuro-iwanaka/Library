@@ -1,14 +1,14 @@
 #pragma once
 
-#include<Eigen/Dense>
-#include<cmath>
-#include<algorithm>
+#include <Eigen/Dense>
+#include <cmath>
+// #include<algorithm>
 
-#include"types"
-#include"constants"
-#include"geometry"
+#include "Types"
+#include "Geometry"
 
-namespace radiative_transfer
+// namespace radiative_transfer
+namespace aad::core
 {
 
 // This implimentation is for scalar radiative transfer.

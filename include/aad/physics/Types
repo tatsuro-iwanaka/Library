@@ -1,33 +1,19 @@
 #pragma once
 
-#include <map>
 #include <vector>
-// #include <string>
-// #include <fstream>
-#include <Eigen/Dense>
-// #include <optional>
+#include <string>
+#include <map>
+#include <cstdint>
 
-// #include "constants"
-// #include "hitran"
-// #include "logger"
+#include "../core/Types"
+#include "HITRAN"
+#include "Units"
 
-// namespace radiative_transfer
-namespace aad::core
+namespace aad::physics
 {
-
-enum class GridType{Regular, GaussRadau};
-const inline std::map<std::string, GridType> map_grid_type = {
-	{"GAUSSRADAU",  GridType::GaussRadau},
-	{"GAUSS_RADAU",  GridType::GaussRadau},
-	{"REGULAR", GridType::Regular}
-};
-
-/*
-enum class UnitDim{Length, Area, Mass, Temperature, Pressure, NumberDensity, ColumnNumberDensity, Wavenumber, Dimensionless};
 
 enum class SpectralCoordinateDimension{Wavenumber, Wavelength, Frequency};
-const inline std::map<std::string, SpectralCoordinateDimension> map_spectral_coordinate_dimension =
-{
+const inline std::map<std::string, SpectralCoordinateDimension> map_spectral_coordinate_dimension = {
 	{"WAVENUMBER",  SpectralCoordinateDimension::Wavenumber},
 	{"WAVELENGTH", SpectralCoordinateDimension::Wavelength},
 	{"FREQUENCY",  SpectralCoordinateDimension::Frequency}
@@ -42,15 +28,13 @@ const inline std::map<std::string, SpectralCoordinateType> map_spectral_coordina
 };
 
 enum class VerticalProfileInterpolation{Exponential, Linear};
-const inline std::map<std::string, VerticalProfileInterpolation> map_vertical_profile_interpolation =
-{
+const inline std::map<std::string, VerticalProfileInterpolation> map_vertical_profile_interpolation = {
 	{"EXPONENTIAL",  VerticalProfileInterpolation::Exponential},
 	{"LINEAR", VerticalProfileInterpolation::Linear}
 };
 
 enum class ScatterType{Rayleigh, Mie, HenyeyGreenstein, Isotropic};
-const inline std::map<std::string, ScatterType> map_scatter_type =
-{
+const inline std::map<std::string, ScatterType> map_scatter_type = {
 	{"RAYLEIGH",  ScatterType::Rayleigh},
 	{"MIE", ScatterType::Mie},
 	{"HENYEY_GREENSTEIN",  ScatterType::HenyeyGreenstein},
@@ -60,15 +44,13 @@ const inline std::map<std::string, ScatterType> map_scatter_type =
 };
 
 enum class SpeciesState{Molecule, Aerosol};
-const inline std::map<std::string, SpeciesState> map_species_state =
-{
+const inline std::map<std::string, SpeciesState> map_species_state = {
 	{"MOLECULE",  SpeciesState::Molecule},
 	{"AEROSOL", SpeciesState::Aerosol}
 };
 
 enum class SpeciesType{Absorber, Scatterer, Extinction};
-const inline std::map<std::string, SpeciesType> map_species_type =
-{
+const inline std::map<std::string, SpeciesType> map_species_type = {
 	{"ABSORBER",  SpeciesType::Absorber},
 	{"SCATTERER", SpeciesType::Scatterer},
 	{"EXTINCTION", SpeciesType::Extinction},
@@ -76,8 +58,7 @@ const inline std::map<std::string, SpeciesType> map_species_type =
 };
 
 enum class ParticleSizeDistribution{Delta, Rectangular, LogNormal, Gamma, ModifiedGamma, PowerLaw};
-const inline std::map<std::string, ParticleSizeDistribution> map_particle_size_distribution =
-{
+const inline std::map<std::string, ParticleSizeDistribution> map_particle_size_distribution = {
 	{"DELTA", ParticleSizeDistribution::Delta},
 	{"RECTANGULAR", ParticleSizeDistribution::Rectangular},
 	{"LOG_NORMAL", ParticleSizeDistribution::LogNormal},
@@ -89,8 +70,7 @@ const inline std::map<std::string, ParticleSizeDistribution> map_particle_size_d
 };
 
 enum class VerticalProfileType{MixingRatio, NumberDensity, ColumnNumberDensity};
-const inline std::map<std::string, VerticalProfileType> map_vertical_profile_type =
-{
+const inline std::map<std::string, VerticalProfileType> map_vertical_profile_type = {
 	{"MIXING_RATIO",  VerticalProfileType::MixingRatio},
 	{"NUMBER_DENSITY", VerticalProfileType::NumberDensity},
 	{"NUMBERDENSITY", VerticalProfileType::NumberDensity},
@@ -99,16 +79,14 @@ const inline std::map<std::string, VerticalProfileType> map_vertical_profile_typ
 };
 
 enum class CrossSectionType{External, Constant, HITRAN};
-const inline std::map<std::string, CrossSectionType> map_cross_section_type =
-{
+const inline std::map<std::string, CrossSectionType> map_cross_section_type = {
 	{"EXTERNAL",  CrossSectionType::External},
 	{"CONSTANT", CrossSectionType::Constant},
 	{"HITRAN", CrossSectionType::HITRAN}
 };
 
 enum class RefractiveIndexType{Constant, Spectral, Vertical, SpectralVertical};
-const inline std::map<std::string, RefractiveIndexType> map_refractive_index_type =
-{
+const inline std::map<std::string, RefractiveIndexType> map_refractive_index_type = {
 	{"CONSTANT", RefractiveIndexType::Constant},
 	{"SPECTRAL", RefractiveIndexType::Spectral},
 	{"VERTICAL", RefractiveIndexType::Vertical},
@@ -123,30 +101,85 @@ const inline std::map<std::string, RefractiveIndexType> map_refractive_index_typ
 	{"2D", RefractiveIndexType::SpectralVertical}
 };
 
-// enum class RefractiveIndexSpectrumType{Constant, External};
-// const inline std::map<std::string, RefractiveIndexSpectrumType> map_refractive_index_spectrum_type =
-// {
-// 	{"CONSTANT",  RefractiveIndexSpectrumType::Constant},
-// 	{"EXTERNAL", RefractiveIndexSpectrumType::External}
-// };
+enum class VerticalTemperatureProfile{VIRA_EQUATOR, VIRA_45, VIRA_60, Table, External};
+const inline std::map<std::string, VerticalTemperatureProfile> map_vertical_temperature_profile = {
+	{"VIRA_EQUATOR",  VerticalTemperatureProfile::VIRA_EQUATOR},
+	{"VIRA_45", VerticalTemperatureProfile::VIRA_45},
+	{"VIRA_60", VerticalTemperatureProfile::VIRA_60},
+	{"TABLE", VerticalTemperatureProfile::Table},
+	{"EXTERNAL", VerticalTemperatureProfile::External}
+};
 
-// enum class RefractiveIndexVerticalProfile{Constant, Table};
-// const inline std::map<std::string, RefractiveIndexVerticalProfile> map_refractive_index_vertical_profile_type =
-// {
-// 	{"CONSTANT", RefractiveIndexVerticalProfile::Constant},
-// 	{"TABLE", RefractiveIndexVerticalProfile::Table}
-// };
+enum class VerticalPressureProfile{VIRA_EQUATOR, VIRA_45, VIRA_60, Table, Hydrostatic, External};
+const inline std::map<std::string, VerticalPressureProfile> map_vertical_pressure_profile = {
+	{"VIRA_EQUATOR",  VerticalPressureProfile::VIRA_EQUATOR},
+	{"VIRA_45", VerticalPressureProfile::VIRA_45},
+	{"VIRA_60", VerticalPressureProfile::VIRA_60},
+	{"TABLE", VerticalPressureProfile::Table},
+	{"HYDROSTATIC", VerticalPressureProfile::Hydrostatic},
+	{"EXTERNAL", VerticalPressureProfile::External}
+};
 
-enum class InCellSuperSamplingType{Enable, Disable};
-const inline std::map<std::string, InCellSuperSamplingType> map_in_cell_super_sampling_type =
-{
-	{"ENABLE",  InCellSuperSamplingType::Enable},
-	{"DISABLE", InCellSuperSamplingType::Disable}
+enum class VerticalNumberDensityProfile{VIRA_EQUATOR, VIRA_45, VIRA_60, Table, External, IdealGas};
+const inline std::map<std::string, VerticalNumberDensityProfile> map_vertical_number_density_profile = {
+	{"VIRA_EQUATOR",  VerticalNumberDensityProfile::VIRA_EQUATOR},
+	{"VIRA_45", VerticalNumberDensityProfile::VIRA_45},
+	{"VIRA_60", VerticalNumberDensityProfile::VIRA_60},
+	{"TABLE", VerticalNumberDensityProfile::Table},
+	{"EXTERNAL", VerticalNumberDensityProfile::External},
+	{"IDEALGAS", VerticalNumberDensityProfile::IdealGas},
+	{"IDEAL_GAS", VerticalNumberDensityProfile::IdealGas},
+	{"IDEALGASLAW", VerticalNumberDensityProfile::IdealGas},
+	{"IDEAL_GAS_LAW", VerticalNumberDensityProfile::IdealGas}
+};
+
+enum class SurfaceType{NoSurface, Lambert};
+const inline std::map<std::string, SurfaceType> map_surface_type = {
+	{"NO_SURFACE",  SurfaceType::NoSurface},
+	{"NOSURFACE", SurfaceType::NoSurface},
+	{"NONE", SurfaceType::NoSurface},
+	{"LAMBERT", SurfaceType::Lambert},
+	{"LAMBERTIAN", SurfaceType::Lambert}
+};
+
+enum class WindowFunctionType{Gauss, Rectangle, External, Table};
+const inline std::map<std::string, WindowFunctionType> map_window_function_type = {
+	{"GAUSS",  WindowFunctionType::Gauss},
+	{"GAUSSIAN",  WindowFunctionType::Gauss},
+	{"RECTANGLE", WindowFunctionType::Rectangle},
+	{"RECTANGULAR", WindowFunctionType::Rectangle},
+	{"TABLE", WindowFunctionType::Table},
+	{"EXTERNAL", WindowFunctionType::External}
+};
+
+enum class InstrumentFunctionType{Delta, Gauss, Rectangle, External};
+const inline std::map<std::string, InstrumentFunctionType> map_instrument_function_type = {
+	{"NONE",  InstrumentFunctionType::Delta},
+	{"DELTA",  InstrumentFunctionType::Delta},
+	{"GAUSS",  InstrumentFunctionType::Gauss},
+	{"GAUSSIAN",  InstrumentFunctionType::Gauss},
+	{"RECTANGLE", InstrumentFunctionType::Rectangle},
+	{"RECTANGULAR", InstrumentFunctionType::Rectangle},
+	{"EXTERNAL", InstrumentFunctionType::External}
+};
+
+enum class IsotopologueType{All, Defined};
+const inline std::map<std::string, IsotopologueType> map_isotopologue_type = {
+	{"ALL",  IsotopologueType::All},
+	{"HITRAN",  IsotopologueType::All},
+	{"DEFINED", IsotopologueType::Defined},
+	{"TABLE", IsotopologueType::Defined}
+};
+
+enum class IsotopologueAbundanceType{HITRAN, Defined};
+const inline std::map<std::string, IsotopologueAbundanceType> map_isotopologue_abundance_type = {
+	{"HITRAN",  IsotopologueAbundanceType::HITRAN},
+	{"DEFINED", IsotopologueAbundanceType::Defined},
+	{"TABLE", IsotopologueAbundanceType::Defined}
 };
 
 enum class DeltaApproximationType{Disable, d_m1, d_m2, FWHM, Cumulative};
-const inline std::map<std::string, DeltaApproximationType> map_delta_approximation_type =
-{
+const inline std::map<std::string, DeltaApproximationType> map_delta_approximation_type = {
 	{"NONE",  DeltaApproximationType::Disable},
 	{"DISABLE", DeltaApproximationType::Disable},
 	{"D_M1", DeltaApproximationType::d_m1},
@@ -161,107 +194,20 @@ const inline std::map<std::string, DeltaApproximationType> map_delta_approximati
 	{"CUMULATIVE", DeltaApproximationType::Cumulative}
 };
 
-enum class VerticalTemperatureProfile{VIRA_EQUATOR, VIRA_45, VIRA_60, Table, External};
-const inline std::map<std::string, VerticalTemperatureProfile> map_vertical_temperature_profile =
-{
-	{"VIRA_EQUATOR",  VerticalTemperatureProfile::VIRA_EQUATOR},
-	{"VIRA_45", VerticalTemperatureProfile::VIRA_45},
-	{"VIRA_60", VerticalTemperatureProfile::VIRA_60},
-	{"TABLE", VerticalTemperatureProfile::Table},
-	{"EXTERNAL", VerticalTemperatureProfile::External}
+enum class InCellSuperSamplingType{Enable, Disable};
+const inline std::map<std::string, InCellSuperSamplingType> map_in_cell_super_sampling_type = {
+	{"ENABLE",  InCellSuperSamplingType::Enable},
+	{"DISABLE", InCellSuperSamplingType::Disable}
 };
 
-enum class VerticalPressureProfile{VIRA_EQUATOR, VIRA_45, VIRA_60, Table, Hydrostatic, External};
-const inline std::map<std::string, VerticalPressureProfile> map_vertical_pressure_profile =
+struct DeltaApproximation
 {
-	{"VIRA_EQUATOR",  VerticalPressureProfile::VIRA_EQUATOR},
-	{"VIRA_45", VerticalPressureProfile::VIRA_45},
-	{"VIRA_60", VerticalPressureProfile::VIRA_60},
-	{"TABLE", VerticalPressureProfile::Table},
-	{"HYDROSTATIC", VerticalPressureProfile::Hydrostatic},
-	{"EXTERNAL", VerticalPressureProfile::External}
-};
-
-enum class VerticalNumberDensityProfile{VIRA_EQUATOR, VIRA_45, VIRA_60, Table, External, IdealGas};
-const inline std::map<std::string, VerticalNumberDensityProfile> map_vertical_number_density_profile =
-{
-	{"VIRA_EQUATOR",  VerticalNumberDensityProfile::VIRA_EQUATOR},
-	{"VIRA_45", VerticalNumberDensityProfile::VIRA_45},
-	{"VIRA_60", VerticalNumberDensityProfile::VIRA_60},
-	{"TABLE", VerticalNumberDensityProfile::Table},
-	{"EXTERNAL", VerticalNumberDensityProfile::External},
-	{"IDEALGAS", VerticalNumberDensityProfile::IdealGas},
-	{"IDEAL_GAS", VerticalNumberDensityProfile::IdealGas},
-	{"IDEALGASLAW", VerticalNumberDensityProfile::IdealGas},
-	{"IDEAL_GAS_LAW", VerticalNumberDensityProfile::IdealGas}
-};
-
-enum class SurfaceType{NoSurface, Lambert};
-const inline std::map<std::string, SurfaceType> map_surface_type =
-{
-	{"NO_SURFACE",  SurfaceType::NoSurface},
-	{"NOSURFACE", SurfaceType::NoSurface},
-	{"NONE", SurfaceType::NoSurface},
-	{"LAMBERT", SurfaceType::Lambert},
-	{"LAMBERTIAN", SurfaceType::Lambert}
-};
-
-
-enum class WindowFunctionType{Gauss, Rectangle, External, Table};
-const inline std::map<std::string, WindowFunctionType> map_window_function_type =
-{
-	{"GAUSS",  WindowFunctionType::Gauss},
-	{"GAUSSIAN",  WindowFunctionType::Gauss},
-	{"RECTANGLE", WindowFunctionType::Rectangle},
-	{"RECTANGULAR", WindowFunctionType::Rectangle},
-	{"TABLE", WindowFunctionType::Table},
-	{"EXTERNAL", WindowFunctionType::External}
-};
-
-enum class GridType{Regular, GaussRadau};
-const inline std::map<std::string, GridType> map_grid_type =
-{
-	{"GAUSSRADAU",  GridType::GaussRadau},
-	{"GAUSS_RADAU",  GridType::GaussRadau},
-	{"REGULAR", GridType::Regular}
-};
-
-enum class InstrumentFunctionType{Delta, Gauss, Rectangle, External};
-const inline std::map<std::string, InstrumentFunctionType> map_instrument_function_type =
-{
-	{"NONE",  InstrumentFunctionType::Delta},
-	{"DELTA",  InstrumentFunctionType::Delta},
-	{"GAUSS",  InstrumentFunctionType::Gauss},
-	{"GAUSSIAN",  InstrumentFunctionType::Gauss},
-	{"RECTANGLE", InstrumentFunctionType::Rectangle},
-	{"RECTANGULAR", InstrumentFunctionType::Rectangle},
-	{"EXTERNAL", InstrumentFunctionType::External}
-};
-
-enum class IsotopologueType{All, Defined};
-const inline std::map<std::string, IsotopologueType> map_isotopologue_type =
-{
-	{"ALL",  IsotopologueType::All},
-	{"HITRAN",  IsotopologueType::All},
-	{"DEFINED", IsotopologueType::Defined},
-	{"TABLE", IsotopologueType::Defined}
-};
-
-enum class IsotopologueAbundanceType{HITRAN, Defined};
-const inline std::map<std::string, IsotopologueAbundanceType> map_isotopologue_abundance_type =
-{
-	{"HITRAN",  IsotopologueAbundanceType::HITRAN},
-	{"DEFINED", IsotopologueAbundanceType::Defined},
-	{"TABLE", IsotopologueAbundanceType::Defined}
-};
-
-enum class JacobianType{Temperature, TotalNumberDensity, SpeciesNumberDensity, SpeciesMixingRatio};
-
-class UnitInfo
-{	
 	public:
-		UnitDim dim;
-		double to_si;  // この単位 → SI 基本単位への乗数
+		DeltaApproximationType delta_approximation_type;
+		InCellSuperSamplingType icss_type;
+		int n_icss_sample;
+		double fwhm_ratio;
+		double f_target;
 };
 
 class ArrheniusCrossSectionModel
@@ -319,8 +265,8 @@ struct Species
 		// std::vector<std::vector<double>> refractive_index_vertical_profile; // nr, ni
 
 		bool is_hitran;
-		hitran::Isotopologue isotopologue;
-		std::vector<hitran::Line> lines;
+		Isotopologue isotopologue;
+		std::vector<Line> lines;
 };
 
 class OpticalLayer
@@ -348,57 +294,18 @@ class OpticalLayer
 		std::vector<double> species_absorption_cross_section; // species
 		std::vector<double> species_scattering_cross_section; // species
 
-		void clear(void);
-};
-*/
-class RadiativeLayer
-{
-	public:
-		std::vector<Eigen::MatrixXd> reflectance_m_top_cos;
-		std::vector<Eigen::MatrixXd> reflectance_m_bottom_cos;
-		std::vector<Eigen::MatrixXd> transmittance_m_top_cos;
-		std::vector<Eigen::MatrixXd> transmittance_m_bottom_cos;
-
-		std::vector<Eigen::MatrixXd> reflectance_m_top_sin;
-		std::vector<Eigen::MatrixXd> reflectance_m_bottom_sin;
-		std::vector<Eigen::MatrixXd> transmittance_m_top_sin;
-		std::vector<Eigen::MatrixXd> transmittance_m_bottom_sin;
-
-		Eigen::MatrixXd source_up;
-		Eigen::MatrixXd source_down;
-
-		int n_doubling;
-
-		bool enable_atmospheric_emission;
-		bool is_surface;
-
-		// std::vector<std::vector<std::vector<double>>> reflectance_top;
-		// std::vector<std::vector<std::vector<double>>> reflectance_bottom;
-		// std::vector<std::vector<std::vector<double>>> transmittance_top;
-		// std::vector<std::vector<std::vector<double>>> transmittance_bottom;
-
-		double optical_thickness; //dimensionless
-
 		void clear(void)
 		{
-			reflectance_m_top_cos.clear();
-			reflectance_m_bottom_cos.clear();
-			transmittance_m_top_cos.clear();
-			transmittance_m_bottom_cos.clear();
-
-			reflectance_m_top_sin.clear();
-			reflectance_m_bottom_sin.clear();
-			transmittance_m_top_sin.clear();
-			transmittance_m_bottom_sin.clear();
-
-			source_up.resize(0, 0);
-			source_down.resize(0, 0);
+			scattering_phase_function.clear();	//angle (radian), magnitude (dimensionless)
+			is_scattering_species.clear();
+			species_scattering_phase_function.clear(); // species, scattering_angle
+			species_absorption_cross_section.clear(); // species
+			species_scattering_cross_section.clear();
 
 			return;
 		}
-
 };
-/*
+
 struct AtmosphereModel
 {
 	public:
@@ -413,31 +320,11 @@ struct AtmosphereModel
 		std::vector<double> temperature;
 		std::vector<double> pressure;
 		std::vector<double> number_density;
-		hitran::Diluent diluent;
+		Diluent diluent;
 		bool is_hitran;
 		// bool enable_atmospheric_emission = false;
 };
-*/
-struct Geometry //for Fourier-AD
-{
-	public:
-		int M;
-		int Ntheta;
-		int Nphi;
 
-		double d_phi;
-		
-		Eigen::VectorXd theta_uh;
-		Eigen::VectorXd theta_lh;
-		Eigen::VectorXd theta_all;
-
-		Eigen::VectorXd phi;
-
-		Eigen::VectorXd weight;
-		Eigen::VectorXd mu;
-		Eigen::MatrixXd WMU;
-};
-/*
 class Configuration
 {
 	private:
@@ -462,13 +349,13 @@ class Configuration
 			std::optional<int> n_theta;
 			std::optional<int> n_phi;
 			std::optional<int> n_mode;
-			std::optional<GridType> grid_type;
+			std::optional<core::GridType> grid_type;
 		};
 
 		struct DeltaM
 		{
-			std::optional<DeltaApproximationType> delta_approximation_type;
-			std::optional<InCellSuperSamplingType> icss_type;
+			std::optional<physics::DeltaApproximationType> delta_approximation_type;
+			std::optional<physics::InCellSuperSamplingType> icss_type;
 			std::optional<int> n_icss_sample; // (3)
 			std::optional<double> fwhm_ratio; // for fwhm (0.5)
 			std::optional<double> f_target; // for cumulative (0.01)
@@ -715,53 +602,6 @@ struct SpectralInformation
 		// instrumentの情報のことも格納
 };
 
-struct DeltaApproximation
-{
-	public:
-		DeltaApproximationType delta_approximation_type;
-		InCellSuperSamplingType icss_type;
-		int n_icss_sample;
-		double fwhm_ratio;
-		double f_target;
-};
-
-class ConfigurationLoader
-{
-	public:
-		static Configuration load(const std::string&);
-
-	private:
-		static std::map<std::string, std::string> importYaml_(const std::string&);
-
-		static Configuration::Simulation loadSimulation_(const std::map<std::string, std::string>&);
-		static Configuration::Surface loadSurface_(const std::map<std::string, std::string>&);
-		static Configuration::Atmosphere loadAtmosphere_(const std::map<std::string, std::string>&);
-		static Configuration::GeometryConfiguration loadGeometry_(const std::map<std::string, std::string>&);
-		static Configuration::DeltaM loadDeltaM_(const std::map<std::string, std::string>&);
-		static Configuration::Instrument loadInstrument_(const std::map<std::string, std::string>&);
-		static Configuration::SpectralCoordinate loadSpectralCoordinate_(const std::map<std::string, std::string>&);
-
-		static std::string getRequiredString_(const std::map<std::string, std::string>&, const std::string&);
-		static int getRequiredInt_(const std::map<std::string, std::string>&, const std::string&);
-		static double getRequiredDouble_(const std::map<std::string, std::string>&, const std::string&);
-		static bool getRequiredBool_(const std::map<std::string, std::string>&, const std::string&);
-
-		static std::string getOptionalString_(const std::map<std::string, std::string>&, const std::string&, const std::string&);
-		static int getOptionalInt_(const std::map<std::string, std::string>&, const std::string&, int);
-		static double getOptionalDouble_(const std::map<std::string, std::string>&, const std::string&, double);
-		static bool getOptionalBool_(const std::map<std::string, std::string>&, const std::string&, bool);
-
-		static std::optional<std::string> getOptionalString_(const std::map<std::string, std::string>&, const std::string&);
-		static std::optional<int> getOptionalInt_(const std::map<std::string, std::string>&, const std::string&);
-		static std::optional<double> getOptionalDouble_(const std::map<std::string, std::string>&, const std::string&);
-		static std::optional<bool> getOptionalBool_(const std::map<std::string, std::string>&, const std::string&);
-
-		static bool hasKey_(const std::map<std::string, std::string>&, const std::string&);
-		static int countArrayEntries_(const std::map<std::string, std::string>&, const std::string&);
-
-		template<typename EnumT> static std::optional<EnumT> parseEnum_(const std::optional<std::string>&, const std::map<std::string, EnumT>&);
-};
-
 struct MonochromeData
 {
 	public:
@@ -808,118 +648,5 @@ struct RadiativeTransferResult
 		std::vector<double> spectral_grid;
 		SpectralCoordinateDimension spectral_dimension;
 };
-
-class RadiativeTransferSolver
-{
-	private:
-		Geometry geometry_;
-		DeltaApproximation delta_approximation_;
-		
-		double initial_optical_thickness_;
-		int n_scattering_angle_;
-
-		RadiativeLayer initializeAtmosphericLayer_(const OpticalLayer&);
-		RadiativeLayer initializeSurfaceLayer_(const OpticalLayer&);
-
-		std::vector<OpticalLayer> setAtmosphericLayerCondition_(const AtmosphereModel&, double, SpectralCoordinateDimension);
-		OpticalLayer setSurfaceLayerCondition_(const AtmosphereModel&, double, SpectralCoordinateDimension);
-
-		void computeDeltaApproximation_(OpticalLayer&);
-
-	public:
-		RadiativeTransferSolver();
-		RadiativeTransferSolver(const Geometry&);
-
-		void geometry(const Geometry&); // setter
-		void delta_approximation(const DeltaApproximation&); // setter
-
-		MonochromeData computeMonochrome(const AtmosphereModel&, double, SpectralCoordinateDimension, double, int);
-		std::vector<std::vector<std::vector<double>>> reconstruct(const std::vector<std::vector<std::vector<std::vector<double>>>>&);
-		// void reconstructOpticalProperties(RadiativeLayer&);
-		std::vector<std::vector<Eigen::MatrixXd>> computeFourierSeriesCoefficients(const std::vector<std::vector<std::vector<double>>>&);
-		// void computeFourierSeriesCoefficients(RadiativeLayer&);
-};
-
-class ModelBuilder
-{
-	public:
-		static AtmosphereModel buildAtmosphereModel(const Configuration&, const SpectralInformation&);
-		static Geometry buildGeometry(const Configuration&);
-		static SpectralInformation buildSpectral(const Configuration&);
-		static DeltaApproximation buildDeltaApproximation(const Configuration&);
-		static SimulationInformation buildSimulation(const Configuration&);
-
-	private:
-		static std::vector<Species> buildSpecies_(const Configuration&, const AtmosphereModel&, const SpectralInformation&);
-		static double interpolateVerticalProfile(double, const std::vector<std::vector<double>>&, VerticalProfileInterpolation);
-};
-
-class RadiativeTransfer
-{
-	private:
-		Configuration configuration_;
-		SimulationInformation simulation_;
-		AtmosphereModel atmosphere_model_;
-		RadiativeTransferSolver radiative_transfer_solver_;
-		SpectralInformation spectral_;
-		Geometry geometry_;
-		DeltaApproximation delta_approximation_;
-		RadiativeTransferResult result_;
-
-		std::string config_filename_;
-
-		// logger::Log log;
-		
-	public:
-		RadiativeTransfer();
-		RadiativeTransfer(const std::string&);
-		void loadConfiguration(void);
-		void run(void);
-		void exportResultNetCDF(void);
-		RadiativeTransferResult result(void);
-};
-
-class JacobianResult
-{
-	public:
-		int Ntheta, Nphi, Nmode;
-		std::vector<double> altitude;
-
-		std::vector<double> emission_zenith_angle;
-		std::vector<double> incidence_zenith_angle;
-		std::vector<double> emission_azimuth_angle;
-		
-		std::vector<Eigen::VectorXd> weighting_function_source_up;
-		std::vector<Eigen::VectorXd> contribution_function_source_up;
-
-		std::vector<std::vector<std::vector<std::vector<double>>>> weighting_function_reflectance_top;
-		std::vector<std::vector<std::vector<std::vector<double>>>> contribution_function_reflectance_top;
-
-		std::vector<std::vector<Eigen::MatrixXd>> weighting_function_reflectance_m_top_cos;
-		std::vector<std::vector<Eigen::MatrixXd>> weighting_function_reflectance_m_top_sin;
-		std::vector<std::vector<Eigen::MatrixXd>> contribution_function_reflectance_m_top_cos;
-		std::vector<std::vector<Eigen::MatrixXd>> contribution_function_reflectance_m_top_sin;
-
-		void initialize(int nlayer)
-		{
-			altitude.resize(nlayer);
-			// emission_zenith_angle.resize(nlayer);
-
-			weighting_function_source_up.resize(nlayer);
-			contribution_function_source_up.resize(nlayer);
-
-			weighting_function_reflectance_top.resize(nlayer);
-			contribution_function_reflectance_top.resize(nlayer);
-
-			weighting_function_reflectance_m_top_cos.resize(nlayer);
-			contribution_function_reflectance_m_top_cos.resize(nlayer);
-
-			weighting_function_reflectance_m_top_sin.resize(nlayer);
-			contribution_function_reflectance_m_top_sin.resize(nlayer);
-
-			return;
-		}
-};
-*/
 
 }

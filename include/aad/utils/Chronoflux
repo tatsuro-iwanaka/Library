@@ -10,7 +10,7 @@
 
 #include <ctime>
 
-namespace chronoflux
+namespace aad::utils
 {
 
 const std::int64_t PICO_PER_SEC = 1'000'000'000'000LL; // 10^12

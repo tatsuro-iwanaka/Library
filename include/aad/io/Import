@@ -1,0 +1,358 @@
+#pragma once
+
+#include<fstream>
+#include<iostream>
+#include<map>
+#include<sstream>
+#include<string>
+#include<vector>
+#include<algorithm>
+
+#include <omp.h>
+
+#include "Logger"
+#include "../Core"
+#include "../physics/Types"
+#include "../physics/Units"
+#include "../utils/String"
+
+namespace aad::io
+{
+	
+std::vector<std::vector<double>> loadSpectralFile(std::string, std::string, std::string, std::string, std::string);
+std::vector<std::vector<double>> loadRefractiveIndexSpectralFile(std::string, std::string, std::string, std::string, std::string);
+std::vector<std::vector<std::vector<double>>> loadRefractiveIndexSpectralVerticalFile(std::string, std::string, std::string, std::string, std::string, std::string, std::string);
+
+inline std::vector<std::vector<double>> loadSpectralFile(std::string filename, std::string var_name_spectral, std::string var_name_value, std::string unit_target_spectral, std::string unit_target_value)
+{
+	try
+	{
+		netCDF::NcFile dataFile(filename, netCDF::NcFile::read);
+
+		auto getVarSafe = [&](std::string name) -> netCDF::NcVar
+		{
+			netCDF::NcVar var = dataFile.getVar(name);
+			if(var.isNull())
+			{
+				global().fatal("loadSpectralFile") << "NetCDF Variable '" + name + "' not found in " + filename;
+				throw std::runtime_error("NetCDF Variable '" + name + "' not found in " + filename);
+			}
+			return var;
+		};
+
+		netCDF::NcVar v_spec = getVarSafe(var_name_spectral);
+		netCDF::NcVar v_value = getVarSafe(var_name_value);
+
+		size_t n_data = v_spec.getDim(0).getSize();
+
+		// 単位変換
+		std::string source_unit_spec;
+		try
+		{
+			netCDF::NcVarAtt att = v_spec.getAtt("units");
+			if(!att.isNull()) att.getValues(source_unit_spec);
+		}
+		catch(...)
+		{
+			global().info("loadSpectralFile") << "Unit missing for " << var_name_spectral << ". Assuming " << unit_target_spectral << ".";
+			source_unit_spec = unit_target_spectral;
+		}
+
+		std::string source_unit_value;
+		try
+		{
+			netCDF::NcVarAtt att = v_value.getAtt("units");
+			if(!att.isNull()) att.getValues(source_unit_value);
+		}
+		catch(...)
+		{
+			global().info("loadSpectralFile") << "Unit missing for " << var_name_value << ". Assuming " << unit_target_value << ".";
+			source_unit_value = unit_target_value;
+		}
+
+		// double scale_spec = scaleUnit(source_unit_spec, unit_target_spectral);
+
+		// データ読み込み
+		std::vector<double> buf_spec(n_data);
+		std::vector<double> buf_value(n_data);
+
+		v_spec.getVar(buf_spec.data());
+		v_value.getVar(buf_value.data());
+
+		bool is_spectral_dimension_mismatch;
+		double scale_spec;
+
+		if(physics::getUnitInfo(unit_target_spectral).dim != physics::getUnitInfo(source_unit_spec).dim)
+		{
+			is_spectral_dimension_mismatch = true;
+			scale_spec = 1.0 / (physics::getUnitInfo(source_unit_spec).to_si * physics::getUnitInfo(unit_target_spectral).to_si);
+		}
+		else
+		{
+			is_spectral_dimension_mismatch = false;
+			scale_spec = physics::scaleUnit(source_unit_spec, unit_target_spectral);
+		}
+
+		double scale_value = physics::scaleUnit(source_unit_value, unit_target_value);
+
+		// 戻り値の構築 {{spec, nr, ni}, ...}
+		std::vector<std::vector<double>> result(n_data);
+		for(size_t i = 0; i < n_data; ++i)
+		{
+			if(is_spectral_dimension_mismatch == true)
+			{
+				result[i] = {1.0 / buf_spec[i] * scale_spec, buf_value[i] * scale_value};
+			}
+			else
+			{
+				result[i] = {buf_spec[i] * scale_spec, buf_value[i] * scale_value};
+			}
+		}
+
+		std::sort(result.begin(), result.end(), [](const auto& a, const auto& b){return a[0] < b[0];});
+
+		return result;
+	}
+	catch(const netCDF::exceptions::NcException& e)
+	{
+		global().fatal("loadSpectralFile") << "NetCDF Error in " + filename + ": " + std::string(e.what());
+		throw std::runtime_error("NetCDF Error in " + filename + ": " + std::string(e.what()));
+	}
+}
+
+inline std::vector<std::vector<double>> loadRefractiveIndexSpectralFile(std::string filename, std::string var_name_spectral, std::string var_name_nr, std::string var_name_ni, std::string unit_target_spectral)
+{
+	try
+	{
+		netCDF::NcFile dataFile(filename, netCDF::NcFile::read);
+
+		auto getVarSafe = [&](std::string name) -> netCDF::NcVar
+		{
+			netCDF::NcVar var = dataFile.getVar(name);
+			if(var.isNull())
+			{
+				global().fatal("loadRefractiveIndexSpectralFile") << "NetCDF Variable '" + name + "' not found in " + filename;
+				throw std::runtime_error("NetCDF Variable '" + name + "' not found in " + filename);
+			}
+			return var;
+		};
+
+		netCDF::NcVar v_spec = getVarSafe(var_name_spectral);
+		netCDF::NcVar v_nr = getVarSafe(var_name_nr);
+		netCDF::NcVar v_ni = getVarSafe(var_name_ni);
+
+		size_t n_data = v_spec.getDim(0).getSize();
+		
+		// 次元整合性チェック
+		if (v_nr.getDim(0).getSize() != n_data || v_ni.getDim(0).getSize() != n_data)
+		{
+			global().fatal("oadRefractiveIndexSpectralFile") << "Dimension size mismatch in refractive index file.";
+			throw std::runtime_error("Dimension size mismatch in refractive index file.");
+		}
+
+		// 単位変換 (屈折率は無次元なので、スペクトルのみ計算)
+		std::string source_unit_spec;
+		try
+		{
+			netCDF::NcVarAtt att = v_spec.getAtt("units");
+			if(!att.isNull()) att.getValues(source_unit_spec);
+		}
+		catch(...)
+		{
+			global().info("loadRefractiveIndexSpectralFile") << "Unit missing for " << var_name_spectral << ". Assuming " << unit_target_spectral << "." ;
+			source_unit_spec = unit_target_spectral;
+		}
+
+		// double scale_spec = scaleUnit(source_unit_spec, unit_target_spectral);
+
+		// データ読み込み
+		std::vector<double> buf_spec(n_data);
+		std::vector<double> buf_nr(n_data);
+		std::vector<double> buf_ni(n_data);
+
+		v_spec.getVar(buf_spec.data());
+		v_nr.getVar(buf_nr.data());
+		v_ni.getVar(buf_ni.data());
+
+		bool is_spectral_dimension_mismatch;
+		double scale_unit;
+
+		if(physics::getUnitInfo(unit_target_spectral).dim != physics::getUnitInfo(source_unit_spec).dim)
+		{
+			is_spectral_dimension_mismatch = true;
+			scale_unit = 1.0 / (physics::getUnitInfo(source_unit_spec).to_si * physics::getUnitInfo(unit_target_spectral).to_si);
+		}
+		else
+		{
+			is_spectral_dimension_mismatch = false;
+			scale_unit = physics::scaleUnit(source_unit_spec, unit_target_spectral);
+		}
+
+		// 戻り値の構築 {{spec, nr, ni}, ...}
+		std::vector<std::vector<double>> result(n_data);
+		for(size_t i = 0; i < n_data; ++i)
+		{
+			if(is_spectral_dimension_mismatch == true)
+			{
+				result[i] = {1.0 / buf_spec[i] * scale_unit, buf_nr[i], buf_ni[i]};
+			}
+			else
+			{
+				result[i] = {buf_spec[i] * scale_unit, buf_nr[i], buf_ni[i]};
+			}
+		}
+
+		std::sort(result.begin(), result.end(), [](const auto& a, const auto& b){return a[0] < b[0];});
+
+		return result;
+	}
+	catch(const netCDF::exceptions::NcException& e)
+	{
+		global().fatal("oadRefractiveIndexSpectralFile") << "NetCDF Error in " + filename + ": " + std::string(e.what());
+		throw std::runtime_error("NetCDF Error in " + filename + ": " + std::string(e.what()));
+	}
+}
+
+inline std::vector<std::vector<std::vector<double>>> loadRefractiveIndexSpectralVerticalFile(std::string filename, std::string var_name_altitude, std::string var_name_spectral, std::string var_name_nr, std::string var_name_ni, std::string unit_target_altitude, std::string unit_target_spectral)
+{
+	try
+	{
+		netCDF::NcFile dataFile(filename, netCDF::NcFile::read);
+
+		// ヘルパー: 変数取得と存在チェック
+		auto getVarSafe = [&](std::string name) -> netCDF::NcVar
+		{
+			netCDF::NcVar var = dataFile.getVar(name);
+			if(var.isNull())
+			{
+				global().fatal("loadRefractiveIndexSpectralVerticalFile") << "NetCDF Variable '" + name + "' not found in " + filename;
+				throw std::runtime_error("NetCDF Variable '" + name + "' not found in " + filename);
+			}
+			return var;
+		};
+
+		// 1. 変数オブジェクトの取得
+		netCDF::NcVar v_alt = getVarSafe(var_name_altitude);
+		netCDF::NcVar v_spec = getVarSafe(var_name_spectral);
+		netCDF::NcVar v_nr = getVarSafe(var_name_nr);
+		netCDF::NcVar v_ni = getVarSafe(var_name_ni);
+
+		// 2. 次元の取得 (変数の次元を参照する)
+		// ※変数名と次元名が異なっていても対応できるように getDim(0) を使用
+		size_t n_alt = v_alt.getDim(0).getSize();
+		size_t n_spec = v_spec.getDim(0).getSize();
+
+		// 2Dデータの次元チェック (念のため)
+		if (v_nr.getDimCount() != 2 || v_ni.getDimCount() != 2)
+		{
+			global().fatal("loadRefractiveIndexSpectralVerticalFile") << "Refractive index variables (nr, ni) must be 2D [altitude, spectral].";
+			throw std::runtime_error("Refractive index variables (nr, ni) must be 2D [altitude, spectral].");
+		}
+
+		// 3. 単位変換係数の計算
+		// (NetCDFの "units" 属性を読み、ターゲット単位との比率を計算)
+
+		// 単位変換
+		std::string source_unit_spec;
+		try
+		{
+			netCDF::NcVarAtt att = v_spec.getAtt("units");
+			if(!att.isNull()) att.getValues(source_unit_spec);
+		}
+		catch(...)
+		{
+			global().info("loadRefractiveIndexSpectralVerticalFile") << "Unit missing for " << var_name_spectral << ". Assuming " << unit_target_spectral << ".";
+			source_unit_spec = unit_target_spectral;
+		}
+
+		std::string source_unit_alt;
+		try
+		{
+			netCDF::NcVarAtt att = v_alt.getAtt("units");
+			if(!att.isNull()) att.getValues(source_unit_alt);
+		}
+		catch(...)
+		{
+			global().info("loadRefractiveIndexSpectralVerticalFile") << "Unit missing for " << var_name_altitude << ". Assuming " << unit_target_altitude << ".";
+			source_unit_alt = unit_target_altitude;
+		}
+
+		bool is_spectral_dimension_mismatch;
+		double scale_spec;
+
+		if(physics::getUnitInfo(unit_target_spectral).dim != physics::getUnitInfo(source_unit_spec).dim)
+		{
+			is_spectral_dimension_mismatch = true;
+			scale_spec = 1.0 / (physics::getUnitInfo(source_unit_spec).to_si * physics::getUnitInfo(unit_target_spectral).to_si);
+		}
+		else
+		{
+			is_spectral_dimension_mismatch = false;
+			scale_spec = physics::scaleUnit(source_unit_spec, unit_target_spectral);
+		}
+
+		double scale_alt = physics::scaleUnit(source_unit_alt, unit_target_altitude);
+
+		// 4. データの読み込み & スケーリング
+		std::vector<double> altitudes(n_alt);
+		v_alt.getVar(altitudes.data());
+		for(auto& v : altitudes)
+		{
+			v *= scale_alt; // 単位変換
+		}
+
+		std::vector<double> spectral_grid(n_spec);
+		v_spec.getVar(spectral_grid.data());
+		for(auto& v : spectral_grid)
+		{
+			if(is_spectral_dimension_mismatch == true)
+			{
+				v = 1.0 / v * scale_spec; // 単位変換
+			}
+			else
+			{
+				v = v * scale_spec; // 単位変換
+			}
+		}
+
+		// 5. 2Dデータの読み込み
+		// NetCDF C++ はフラットな1次元配列に読み込む (順序: dim0(alt) -> dim1(spec))
+		std::vector<double> buffer_nr(n_alt * n_spec);
+		std::vector<double> buffer_ni(n_alt * n_spec);
+
+		v_nr.getVar(buffer_nr.data());
+		v_ni.getVar(buffer_ni.data());
+
+		// 6. 戻り値の形式に整形
+		// [Layer][Spec][Alt, Wl, Nr, Ni]
+		std::vector<std::vector<std::vector<double>>> result(n_alt);
+
+		// 高度方向のループ
+		for(size_t i = 0; i < n_alt; ++i)
+		{
+			result[i].resize(n_spec);
+			double current_alt = altitudes[i];
+
+			// スペクトル方向のループ
+			for(size_t k = 0; k < n_spec; ++k)
+			{
+				size_t idx = i * n_spec + k; // フラットインデックス
+				
+				result[i][k] = {current_alt, spectral_grid[k], buffer_nr[idx], buffer_ni[idx]};
+			}
+
+			std::sort(result[i].begin(), result[i].end(), [](const std::vector<double>& a, const std::vector<double>& b){return a[1] < b[1];});
+		}
+
+		std::sort(result.begin(), result.end(), [](const std::vector<std::vector<double>>& a, const std::vector<std::vector<double>>& b){return a[0][0] < b[0][0];});
+
+		return result;
+	}
+	catch(const netCDF::exceptions::NcException& e)
+	{
+		global().fatal("loadRefractiveIndexSpectralVerticalFile") << "NetCDF Error in " + filename + ": " + std::string(e.what());
+		throw std::runtime_error("NetCDF Error in " + filename + ": " + std::string(e.what()));
+	}
+}
+
+}

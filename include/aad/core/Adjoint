@@ -1,14 +1,15 @@
 #pragma once
 
-#include<Eigen/Dense>
-#include<cmath>
-#include<algorithm>
+#include <Eigen/Dense>
+#include <cmath>
+// #include <algorithm>
 
-#include"types"
-#include"constants"
-#include"geometry"
+#include "Types"
+// #include"constants"
+#include "Geometry"
 
-namespace radiative_transfer
+// namespace radiative_transfer
+namespace aad::core
 {
 
 // Return adj_layer

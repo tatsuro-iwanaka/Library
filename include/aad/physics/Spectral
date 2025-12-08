@@ -1,0 +1,233 @@
+#pragma once
+
+#include <complex>
+#include <filesystem>
+#include <fstream>
+#include <iomanip>
+#include <cmath>
+#include <vector>
+#include <string>
+#include <algorithm>
+#include <stdexcept>
+#include <limits>
+
+#include "../Core"
+#include "Types"
+#include "Constants"
+#include "HITRAN"
+#include "../io/Logger"
+#include "../utils/Math"
+
+#include<Eigen/Dense>
+#include<netcdf>
+
+namespace aad::physics
+{
+
+std::vector<double> generateGaussianKernel(double, int, double);
+std::vector<double> generateRectangularKernel(int);
+
+std::vector<std::vector<double>> generateSpectralGridBandpass(int, std::vector<std::vector<double>>, double);
+std::vector<std::vector<double>> generateSpectralGridRectangular(int, double, double);
+std::vector<std::vector<double>> generateSpectralGridGaussian(int, double, double);
+
+inline std::vector<double> generateGaussianKernel(double sigma, int sampling_count, double cut_off_sigma = 3.0)
+{
+	if (sigma <= 0.0)
+	{
+		
+		io::global().fatal("generateGaussianKernel") << "Sigma must be positive.";
+		throw std::runtime_error("Sigma must be positive.");
+	}
+	if ( sampling_count <= 1)
+	{
+		io::global().fatal("generateGaussianKernel") << "Total samples must be greater than 1.";
+		throw std::runtime_error("Total samples must be greater than 1.");
+	}
+	if (sampling_count % 2 == 0)
+	{
+		io::global().fatal("generateGaussianKernel") << "Total samples must be odd.";
+		throw std::runtime_error("Total samples must be odd.");
+	}
+
+	double step = 2.0 * cut_off_sigma * sigma / static_cast<double>(sampling_count - 1);
+
+	int half_width_n = (sampling_count - 1) / 2;
+	std::vector<double> kernel(sampling_count);
+
+	double sum = 0.0;
+	double two_sigma_sq = 2.0 * sigma * sigma;
+
+	for (int i = 0; i < sampling_count; ++i)
+	{
+		double x = (static_cast<double>(i) - static_cast<double>(half_width_n)) * step;
+		
+		double val = std::exp(-(x * x) / two_sigma_sq);
+		
+		kernel[i] = val;
+		sum += val;
+	}
+
+	for (double& v : kernel)
+	{
+		v /= sum;
+	}
+
+	return kernel;
+}
+
+inline std::vector<double> generateRectangularKernel(int sampling_count)
+{
+	if ( sampling_count <= 1)
+	{
+		io::global().fatal("generateRectangularKernel") << "Total samples must be greater than 1.";
+		throw std::runtime_error("Total samples must be greater than 1.");
+	}
+
+	if (sampling_count % 2 == 0)
+	{
+		io::global().fatal("generateRectangularKernel") << "Total samples must be odd.";
+		throw std::runtime_error("Total samples must be odd.");
+	}
+
+	std::vector<double> kernel(sampling_count, 1.0 / static_cast<double>(sampling_count));
+
+	return kernel;
+}
+
+inline std::vector<std::vector<double>> generateSpectralGridBandpass(int n_sample, std::vector<std::vector<double>> filter_data, double cutoff_ratio)
+{
+	std::vector<double> spectral_grid;
+	std::vector<double> filter_function;
+	std::vector<double> weight;
+
+	// 1. 最大感度の探索
+	double max_resp = 0.0;
+	for(const auto& row : filter_data)
+	{
+		if (row[1] > max_resp) max_resp = row[1];
+	}
+
+	// フィルタが無効（全部ゼロ）な場合のチェック
+	if (max_resp <= 0.0)
+	{
+		io::global().fatal("generateSpectralGridBandpass") << "Filter response is invalid (max response is 0).";
+		throw std::runtime_error("Filter response is invalid (max response is 0).");
+	}
+
+	// 2. 閾値の設定 (例: 0.1%)
+	// これ以下の感度は、放射計算結果に寄与しないとみなして無視する
+	// constexpr double CUTOFF_RATIO = 1.0e-3; 
+	double threshold = max_resp * cutoff_ratio;
+
+	// 3. 有効範囲の検出
+	double valid_min = std::numeric_limits<double>::max();
+	double valid_max = -std::numeric_limits<double>::max();
+
+	bool found_peak_start = false; // ピークに入ったか？
+	bool found_peak_end = false;   // ピークを抜けたか？
+
+	for(size_t i = 0; i < filter_data.size(); ++i)
+	{
+		// 閾値を超えている点のみを「有効」とみなす
+		if (filter_data[i][1] >= threshold)
+		{
+			if (found_peak_end)
+			{
+				io::global().fatal("generateSpectralGridBandpass") << "The filter has separate passbands or significant side-lobes.";
+				throw std::runtime_error("The filter has separate passbands or significant side-lobes.");
+			}
+			
+			if (filter_data[i][0] < valid_min) valid_min = filter_data[i][0];
+			if (filter_data[i][0] > valid_max) valid_max = filter_data[i][0];
+
+			found_peak_start = true;
+		}
+		else
+		{
+			if (found_peak_start)
+			{
+				// ピークの中にいたのに、閾値を下回った -> ピーク終了
+				found_peak_end = true;
+			}
+		}
+	}
+
+	// 範囲が見つからなかった場合（あり得ないはずだが念のため）
+	if (valid_min >= valid_max)
+	{
+		
+		io::global().fatal("generateSpectralGridBandpass") << "Could not determine valid filter range. Check filter data or threshold.";// ピーク付近の狭い範囲だけでも確保する、あるいはエラーにする
+		// ここではエラーにする
+		throw std::runtime_error("Could not determine valid filter range. Check filter data or threshold.");
+	}
+
+	// 4. 計算グリッドの生成
+	auto gauss_node = utils::computeGaussLegendreQuadratureNodeWeight(n_sample);
+
+	spectral_grid.resize(n_sample);
+	filter_function.resize(n_sample);
+	weight.resize(n_sample);
+
+	for(int i = 0; i < n_sample; ++i)
+	{
+		double x = 0.5 * (valid_max - valid_min) * gauss_node[i][0] + 0.5 * (valid_max + valid_min);
+
+		spectral_grid[i] = x;
+		double filter = utils::interpolateTableLinear(x, filter_data)[0];
+		filter_function[i] = filter;
+		weight[i] = gauss_node[i][1] * filter * 0.5 * (valid_max - valid_min);
+	}
+
+	return {spectral_grid, filter_function, weight};
+}
+
+inline std::vector<std::vector<double>> generateSpectralGridRectangular(int n_sample, double center, double width)
+{
+	double min = center - 0.5 * width;
+	double max = center + 0.5 * width;
+
+	auto gauss_node = utils::computeGaussLegendreQuadratureNodeWeight(n_sample);
+
+	std::vector<double> spectral_grid(n_sample);
+	std::vector<double> filter_function(n_sample);
+	std::vector<double> weight(n_sample);
+
+	for(int i = 0; i < n_sample; ++i)
+	{
+		spectral_grid[i] = 0.5 * (max - min) * gauss_node[i][0] + 0.5 * (max + min);
+		filter_function[i] = 1.0;
+		weight[i] = gauss_node[i][1] * 1.0 * 0.5 * (max - min);
+	}
+
+	return {spectral_grid, filter_function, weight};
+}
+
+inline std::vector<std::vector<double>> generateSpectralGridGaussian(int n_sample, double center, double sigma)
+{
+	auto gauss_node = utils::computeGaussHermiteQuadratureNodeWeight(n_sample);
+
+	std::vector<double> spectral_grid(n_sample);
+	std::vector<double> filter_function(n_sample);
+	std::vector<double> weight(n_sample);
+
+	for(int i = 0; i < n_sample; ++i)
+	{
+		spectral_grid[i] = std::numbers::sqrt2 * sigma * gauss_node[i][0] + center;
+
+		if(spectral_grid[i] <= 0.0)
+		{
+			spectral_grid[i] = 1.0E-12;
+		}
+
+		// filter_function[i] = 1.0 / (std::sqrt(2.0 * PI) * sigma) * std::exp(-(spectral_grid[i] - center) * (spectral_grid[i] - center) / (2.0 * sigma * sigma));
+		// weight[i] = gauss_node[i][1] / std::sqrt(PI);
+		filter_function[i] = 1.0 / std::numbers::sqrt2 * std::numbers::inv_sqrtpi / sigma * std::exp(-(spectral_grid[i] - center) * (spectral_grid[i] - center) / (2.0 * sigma * sigma));
+		weight[i] = gauss_node[i][1] * std::numbers::inv_sqrtpi;
+	}
+
+	return {spectral_grid, filter_function, weight};
+}
+
+
+}

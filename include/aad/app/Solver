@@ -1,0 +1,746 @@
+#pragma once
+
+#include "../Core"
+#include "../physics/Types"
+#include "../physics/Atmosphere"
+#include "../physics/HITRAN"
+#include "../physics/VIRA"
+#include "../physics/Constants"
+#include "../physics/CrossSection"
+#include "../physics/Scattering"
+#include "../physics/Units"
+#include "../physics/Spectral"
+#include "../io/Config"
+#include "../io/Import"
+#include "../utils/Math"
+#include "../utils/String"
+
+namespace aad
+{
+
+class RadiativeTransferSolver
+{
+	private:
+		core::Geometry geometry_;
+		physics::DeltaApproximation delta_approximation_;
+		
+		double initial_optical_thickness_;
+		int n_scattering_angle_;
+
+		core::RadiativeLayer initializeAtmosphericLayer_(const physics::OpticalLayer&);
+		core::RadiativeLayer initializeSurfaceLayer_(const physics::OpticalLayer&);
+
+		std::vector<physics::OpticalLayer> setAtmosphericLayerCondition_(const physics::AtmosphereModel&, double, physics::SpectralCoordinateDimension);
+		physics::OpticalLayer setSurfaceLayerCondition_(const physics::AtmosphereModel&, double, physics::SpectralCoordinateDimension);
+
+		void computeDeltaApproximation_(physics::OpticalLayer&);
+
+	public:
+		RadiativeTransferSolver();
+		RadiativeTransferSolver(const core::Geometry&);
+
+		void geometry(const core::Geometry&); // setter
+		void delta_approximation(const physics::DeltaApproximation&); // setter
+
+		physics::MonochromeData computeMonochrome(const physics::AtmosphereModel&, double, physics::SpectralCoordinateDimension, double, int);
+};
+
+inline RadiativeTransferSolver::RadiativeTransferSolver()
+{
+	return;
+}
+
+inline RadiativeTransferSolver::RadiativeTransferSolver(const core::Geometry& geometry_input)
+{
+	geometry(geometry_);
+}
+
+inline void RadiativeTransferSolver::geometry(const core::Geometry& geometry_input)
+{
+	geometry_ = geometry_input;
+}
+
+inline void RadiativeTransferSolver::delta_approximation(const physics::DeltaApproximation& delta_approximation_input)
+{
+	delta_approximation_ = delta_approximation_input;
+}
+
+inline physics::MonochromeData RadiativeTransferSolver::computeMonochrome(const physics::AtmosphereModel& atmosphere_model, double spectral, physics::SpectralCoordinateDimension dimension, double initial_optical_thickness = 1.0E-6, int n_scattering_angle = 1001)
+{
+	initial_optical_thickness_ = initial_optical_thickness;
+	n_scattering_angle_ = n_scattering_angle;
+
+	double wavelength;
+	double wavenumber;
+
+	if(dimension == physics::SpectralCoordinateDimension::Wavenumber)
+	{
+		wavelength = 1.0 / spectral;
+		wavenumber = spectral;
+	}
+	else if(dimension == physics::SpectralCoordinateDimension::Wavelength)
+	{
+		wavelength = spectral;
+		wavenumber = 1.0 / spectral;
+	}
+	else
+	{
+		io::global().fatal("RadiativeTransferCalculator::computeMonochrome") << "Frequency calculation is not currently supported.";
+		throw std::runtime_error("[RadiativeTransferCalculator::computeMonochrome] Frequency calculation is not currently supported.");
+	}
+
+	int n_layer = atmosphere_model.altitude.size();
+
+	io::global().info("RadiativeTransferSolver::computeMonochrome") << "Setting atmosphere condition for " << spectral << (dimension == physics::SpectralCoordinateDimension::Wavenumber ? "m-1" : "m") << ".";
+	
+	auto atmosphere_layer_opt = setAtmosphericLayerCondition_(atmosphere_model, spectral, dimension);
+	std::vector<core::RadiativeLayer> atmosphere_layer_rad;
+	
+	if(atmosphere_model.surface_type != physics::SurfaceType::NoSurface)
+	{
+		atmosphere_layer_rad.resize(n_layer + 1);
+	}
+	else
+	{
+		atmosphere_layer_rad.resize(n_layer);
+	}
+
+	core::RadiativeLayer result_layer_rad;
+
+	physics::MonochromeData result;
+	result.absorption_coefficient.resize(n_layer);
+	result.scattering_coefficient.resize(n_layer);
+	result.optical_thickness.resize(n_layer);
+	result.single_scattering_albedo.resize(n_layer);
+	result.asymmetry_parameter.resize(n_layer);
+
+	result.scattering_phase_function.resize(n_layer);
+	result.species_absorption_cross_section.resize(n_layer);
+	result.species_scattering_cross_section.resize(n_layer);
+	result.species_scattering_phase_function.resize(n_layer);
+	result.is_scattering_species = atmosphere_layer_opt[0].is_scattering_species;
+
+	io::global().info("RadiativeTransferSolver::computeMonochrome") << "Setting surface condition for " << spectral << (dimension == physics::SpectralCoordinateDimension::Wavenumber ? "m-1" : "m") << ".";
+
+	if(atmosphere_model.surface_type != physics::SurfaceType::NoSurface)
+	{
+		auto surface_layer_opt = setSurfaceLayerCondition_(atmosphere_model, spectral, dimension);
+		atmosphere_layer_rad[0] = initializeSurfaceLayer_(surface_layer_opt);
+		atmosphere_layer_rad[0].is_surface = true;
+	}
+
+	for(int i = 0; i < n_layer; ++i)
+	{
+		int idx = atmosphere_model.surface_type == physics::SurfaceType::NoSurface ? i : i + 1;
+		computeDeltaApproximation_(atmosphere_layer_opt[i]);
+
+		atmosphere_layer_rad[idx] = initializeAtmosphericLayer_(atmosphere_layer_opt[i]);
+		atmosphere_layer_rad[idx].is_surface = false;
+
+		result.absorption_coefficient[i] = atmosphere_layer_opt[i].absorption_coefficient;
+		result.scattering_coefficient[i] = atmosphere_layer_opt[i].scattering_coefficient;
+		result.optical_thickness[i] = atmosphere_layer_opt[i].optical_thickness;
+		result.single_scattering_albedo[i] = atmosphere_layer_opt[i].single_scattering_albedo;
+		result.asymmetry_parameter[i] = atmosphere_layer_opt[i].asymmetry_parameter;
+
+		result.scattering_phase_function[i] = atmosphere_layer_opt[i].scattering_phase_function;
+		result.species_absorption_cross_section[i] = atmosphere_layer_opt[i].species_absorption_cross_section;
+		result.species_scattering_cross_section[i] = atmosphere_layer_opt[i].species_scattering_cross_section;
+		result.species_scattering_phase_function[i] = atmosphere_layer_opt[i].species_scattering_phase_function;
+	}
+
+	result_layer_rad = core::computeAtmosphere(atmosphere_layer_rad, geometry_);
+
+	result.reflectance_m_top_cos = result_layer_rad.reflectance_m_top_cos;
+	result.reflectance_m_top_sin = result_layer_rad.reflectance_m_top_sin;
+	result.source_up = result_layer_rad.source_up;
+
+	return result;
+}
+
+inline void RadiativeTransferSolver::computeDeltaApproximation_(physics::OpticalLayer& layer)
+{
+	if (delta_approximation_.delta_approximation_type == physics::DeltaApproximationType::Disable)
+	{
+		return;
+	}
+	
+	const auto& P = layer.scattering_phase_function;
+	if (P.empty()) return;
+
+	double norm = 0.0;
+	double m1 = 0.0;
+	double m2 = 0.0;
+	std::vector<double> cumsum(P.size());
+
+	for (size_t i = 0; i < P.size() - 1; ++i)
+	{
+		double theta0 = P[i][0];
+		double theta1 = P[i+1][0];
+		double val0 = P[i][1];
+		double val1 = P[i+1][1];
+		double dtheta = theta1 - theta0;
+
+		// 被積分関数: P(θ) * sin(θ)
+		double f0 = val0 * std::sin(theta0);
+		double f1 = val1 * std::sin(theta1);
+		double w = 0.5 * (f0 + f1) * dtheta;
+
+		norm += w;
+		
+		// g = ∫ P cosθ sinθ dθ / norm
+		m1 += 0.5 * (f0 * std::cos(theta0) + f1 * std::cos(theta1)) * dtheta;
+		
+		// m2 = ∫ P * 0.5(3cos^2-1) sinθ dθ / norm
+		double leg2_0 = 0.5 * (3.0 * std::cos(theta0) * std::cos(theta0) - 1.0);
+		double leg2_1 = 0.5 * (3.0 * std::cos(theta1) * std::cos(theta1) - 1.0);
+		m2 += 0.5 * (f0 * leg2_0 + f1 * leg2_1) * dtheta;
+
+		cumsum[i] = norm;
+	}
+	cumsum.back() = norm;
+
+	if (norm <= 1.0e-50) norm = 1.0;
+
+	double g_asy = m1 / norm;
+	double f_2nd = m2 / norm;
+
+	double f = 0.0;
+
+	switch (delta_approximation_.delta_approximation_type)
+	{
+		case physics::DeltaApproximationType::d_m1: // Delta-Eddington (f = g^2)
+			f = g_asy * g_asy;
+			break;
+
+		case physics::DeltaApproximationType::d_m2: // Delta-M (f = m2)
+			f = f_2nd;
+			break;
+
+		case physics::DeltaApproximationType::Cumulative:
+		{
+			auto it = std::lower_bound(cumsum.begin(), cumsum.end(), delta_approximation_.f_target * norm);
+			size_t idx = std::distance(cumsum.begin(), it);
+			if (idx >= cumsum.size()) 
+			{
+				idx = cumsum.size() - 1;
+			}
+			f = cumsum[idx] / norm;
+			break;
+		}
+
+		case physics::DeltaApproximationType::FWHM:
+		{
+			double H = P[0][1];
+			
+			double B = H;
+			for(size_t k = 0; k < P.size(); ++k) {
+				if(P[k][0] > std::numbers::pi / 2.0 && P[k][1] < B) B = P[k][1];
+			}
+			
+			double T = B + delta_approximation_.fwhm_ratio * (H - B);
+			
+			size_t kc = 0;
+			for(size_t k = 0; k < P.size(); ++k)
+			{
+				if(P[k][1] <= T)
+				{
+					kc = k;
+					break;
+				}
+			}
+
+			f = cumsum[kc] / norm;
+			break;
+		}
+		default:
+			break;
+	}
+
+	f = std::clamp(f, 0.0, 0.99999);
+
+	double tau0 = layer.optical_thickness;
+	double omega0 = layer.single_scattering_albedo;
+	
+	double denom = 1.0 - omega0 * f;
+	if (std::abs(denom) < 1.0e-12) denom = 1.0e-12;
+
+	layer.optical_thickness = (1.0 - omega0 * f) * tau0;
+	layer.single_scattering_albedo = (1.0 - f) * omega0 / denom;
+
+	size_t k_cut = 0;
+	for (size_t k = 0; k < cumsum.size(); ++k)
+	{
+		if (cumsum[k] / norm >= f)
+		{
+			k_cut = k;
+			break;
+		}
+	}
+
+	double A_c = cumsum[k_cut];
+	double alpha = 0.0;
+	
+	if (A_c > 1.0e-50) {
+		alpha = (f * norm) / A_c;
+	}
+	alpha = std::clamp(alpha, 0.0, 1.0);
+
+	double renormalize_factor = 1.0 / (1.0 - f);
+
+	for (size_t i = 0; i < P.size(); ++i)
+	{
+		double Pold = P[i][1];
+		double Pnew = Pold;
+
+		if (i <= k_cut)
+		{
+			Pnew *= (1.0 - alpha);
+		}
+		
+		Pnew *= renormalize_factor;
+
+		layer.scattering_phase_function[i][1] = Pnew;
+	}
+	
+	layer.asymmetry_parameter = physics::computeAsymmetryParameter(layer.scattering_phase_function);
+}
+
+inline core::RadiativeLayer RadiativeTransferSolver::initializeAtmosphericLayer_(const physics::OpticalLayer& optical_layer)
+{
+	core::RadiativeLayer radiative_layer;
+
+	radiative_layer.n_doubling = 0;
+	radiative_layer.optical_thickness = optical_layer.optical_thickness;
+
+	while(radiative_layer.optical_thickness > initial_optical_thickness_)
+	{
+		radiative_layer.optical_thickness /= 2.0;
+		radiative_layer.n_doubling ++;
+	}
+
+	radiative_layer.reflectance_m_top_cos = std::vector<Eigen::MatrixXd>(geometry_.M + 1, Eigen::MatrixXd::Zero(geometry_.Ntheta, geometry_.Ntheta));
+	radiative_layer.reflectance_m_bottom_cos = std::vector<Eigen::MatrixXd>(geometry_.M + 1, Eigen::MatrixXd::Zero(geometry_.Ntheta, geometry_.Ntheta));
+	radiative_layer.transmittance_m_top_cos = std::vector<Eigen::MatrixXd>(geometry_.M + 1, Eigen::MatrixXd::Zero(geometry_.Ntheta, geometry_.Ntheta));
+	radiative_layer.transmittance_m_bottom_cos = std::vector<Eigen::MatrixXd>(geometry_.M + 1, Eigen::MatrixXd::Zero(geometry_.Ntheta, geometry_.Ntheta));
+	
+	radiative_layer.reflectance_m_top_sin = std::vector<Eigen::MatrixXd>(geometry_.M + 1, Eigen::MatrixXd::Zero(geometry_.Ntheta, geometry_.Ntheta));
+	radiative_layer.reflectance_m_bottom_sin = std::vector<Eigen::MatrixXd>(geometry_.M + 1, Eigen::MatrixXd::Zero(geometry_.Ntheta, geometry_.Ntheta));
+	radiative_layer.transmittance_m_top_sin = std::vector<Eigen::MatrixXd>(geometry_.M + 1, Eigen::MatrixXd::Zero(geometry_.Ntheta, geometry_.Ntheta));
+	radiative_layer.transmittance_m_bottom_sin = std::vector<Eigen::MatrixXd>(geometry_.M + 1, Eigen::MatrixXd::Zero(geometry_.Ntheta, geometry_.Ntheta));
+
+	radiative_layer.source_up = Eigen::VectorXd::Zero(geometry_.Ntheta);
+	radiative_layer.source_down = Eigen::VectorXd::Zero(geometry_.Ntheta);
+
+	// delta-M approximations
+
+
+	for(int e_n = 0; e_n < geometry_.Ntheta; e_n ++)
+	{
+		radiative_layer.source_up(e_n) = (1.0 - optical_layer.single_scattering_albedo) * physics::computeThermalEmission(optical_layer.planck_function, radiative_layer.optical_thickness, geometry_.mu(e_n));
+		radiative_layer.source_down(e_n) = (1.0 - optical_layer.single_scattering_albedo) * physics::computeThermalEmission(optical_layer.planck_function, radiative_layer.optical_thickness, geometry_.mu(e_n));
+	}
+
+	std::vector<std::vector<std::vector<double>>> reflectance_top = std::vector<std::vector<std::vector<double>>>(geometry_.Ntheta, std::vector<std::vector<double>>(geometry_.Ntheta, std::vector<double>(geometry_.Nphi)));
+	std::vector<std::vector<std::vector<double>>> reflectance_bottom = std::vector<std::vector<std::vector<double>>>(geometry_.Ntheta, std::vector<std::vector<double>>(geometry_.Ntheta, std::vector<double>(geometry_.Nphi)));
+	std::vector<std::vector<std::vector<double>>> transmittance_top = std::vector<std::vector<std::vector<double>>>(geometry_.Ntheta, std::vector<std::vector<double>>(geometry_.Ntheta, std::vector<double>(geometry_.Nphi)));
+	std::vector<std::vector<std::vector<double>>> transmittance_bottom = std::vector<std::vector<std::vector<double>>>(geometry_.Ntheta, std::vector<std::vector<double>>(geometry_.Ntheta, std::vector<double>(geometry_.Nphi)));
+
+	for(int e = 0; e < geometry_.Ntheta; e ++)
+	{
+		for(int i = 0; i < geometry_.Ntheta; i ++)
+		{
+			for(int p = 0; p < geometry_.Nphi; p ++)
+			{
+				{// for R_top
+					double theta_e = geometry_.theta_uh(e);
+					double theta_i = geometry_.theta_lh(i);
+
+					double xi = std::sin(theta_i);
+					double yi = 0.0;
+					double zi = std::cos(theta_i);
+
+					double xe = std::sin(theta_e) * std::cos(geometry_.phi(p));
+					double ye = std::sin(theta_e) * std::sin(geometry_.phi(p));
+					double ze = std::cos(theta_e);
+
+					double inner = xi * xe + yi * ye + zi * ze;
+					double scattering_angle;
+					if(inner >= 1.0)
+					{
+						scattering_angle = 0.0;
+					}
+					else if(inner <= -1.0)
+					{
+						scattering_angle = std::numbers::pi;
+					}
+					else
+					{
+						scattering_angle = std::acos(inner);
+					}
+
+					if(optical_layer.single_scattering_albedo == 0.0)
+					{
+						reflectance_top[e][i][p] = 0.0;
+					}
+					else
+					{
+						reflectance_top[e][i][p] = optical_layer.single_scattering_albedo * radiative_layer.optical_thickness / (4.0 * geometry_.mu(i) * geometry_.mu(e)) * physics::computePhaseFunction(optical_layer.scattering_phase_function, scattering_angle);
+					}
+				}
+
+				{// for R_bottom
+					double theta_e = geometry_.theta_lh(e);
+					double theta_i = geometry_.theta_uh(i);
+
+					double xi = std::sin(theta_i);
+					double yi = 0.0;
+					double zi = std::cos(theta_i);
+
+					double xe = std::sin(theta_e) * std::cos(geometry_.phi(p));
+					double ye = std::sin(theta_e) * std::sin(geometry_.phi(p));
+					double ze = std::cos(theta_e);
+
+					double inner = xi * xe + yi * ye + zi * ze;
+					double scattering_angle;
+					if(inner >= 1.0)
+					{
+						scattering_angle = 0.0;
+					}
+					else if(inner <= -1.0)
+					{
+						scattering_angle = std::numbers::pi;
+					}
+					else
+					{
+						scattering_angle = std::acos(inner);
+					}
+
+					if(optical_layer.single_scattering_albedo == 0.0)
+					{
+						reflectance_bottom[e][i][p] = 0.0;
+					}
+					else
+					{
+						reflectance_bottom[e][i][p] = optical_layer.single_scattering_albedo * radiative_layer.optical_thickness / (4.0 * geometry_.mu(i) * geometry_.mu(e)) * physics::computePhaseFunction(optical_layer.scattering_phase_function, scattering_angle);
+					}
+				}
+
+				{// for T_top
+					double theta_e = geometry_.theta_lh(e);
+					double theta_i = geometry_.theta_lh(i);
+
+					double xi = std::sin(theta_i);
+					double yi = 0.0;
+					double zi = std::cos(theta_i);
+
+					double xe = std::sin(theta_e) * std::cos(geometry_.phi(p));
+					double ye = std::sin(theta_e) * std::sin(geometry_.phi(p));
+					double ze = std::cos(theta_e);
+
+					double inner = xi * xe + yi * ye + zi * ze;
+					double scattering_angle;
+					if(inner >= 1.0)
+					{
+						scattering_angle = 0.0;
+					}
+					else if(inner <= -1.0)
+					{
+						scattering_angle = std::numbers::pi;
+					}
+					else
+					{
+						scattering_angle = std::acos(inner);
+					}
+
+					if(optical_layer.single_scattering_albedo == 0.0)
+					{
+						transmittance_top[e][i][p] = 0.0;
+					}
+					else
+					{
+						transmittance_top[e][i][p] = optical_layer.single_scattering_albedo * radiative_layer.optical_thickness / (4.0 * geometry_.mu(i) * geometry_.mu(e)) * physics::computePhaseFunction(optical_layer.scattering_phase_function, scattering_angle);
+					}
+				}
+
+				{// for T_bottom
+					double theta_e = geometry_.theta_uh(e);
+					double theta_i = geometry_.theta_uh(i);
+
+					double xi = std::sin(theta_i);
+					double yi = 0.0;
+					double zi = std::cos(theta_i);
+
+					double xe = std::sin(theta_e) * std::cos(geometry_.phi(p));
+					double ye = std::sin(theta_e) * std::sin(geometry_.phi(p));
+					double ze = std::cos(theta_e);
+
+					double inner = xi * xe + yi * ye + zi * ze;
+					double scattering_angle;
+					if(inner >= 1.0)
+					{
+						scattering_angle = 0.0;
+					}
+					else if(inner <= -1.0)
+					{
+						scattering_angle = std::numbers::pi;
+					}
+					else
+					{
+						scattering_angle = std::acos(inner);
+					}
+
+					if(optical_layer.single_scattering_albedo == 0.0)
+					{
+						transmittance_bottom[e][i][p] = 0.0;
+					}
+					else
+					{
+						transmittance_bottom[e][i][p] = optical_layer.single_scattering_albedo * radiative_layer.optical_thickness / (4.0 * geometry_.mu(i) * geometry_.mu(e)) * physics::computePhaseFunction(optical_layer.scattering_phase_function, scattering_angle);
+					}
+				}
+			}
+		}
+	}
+
+	auto R_top = core::computeFourierSeriesCoefficients(reflectance_top, geometry_);
+	auto R_bottom = core::computeFourierSeriesCoefficients(reflectance_bottom, geometry_);
+	auto T_top = core::computeFourierSeriesCoefficients(transmittance_top, geometry_);
+	auto T_bottom = core::computeFourierSeriesCoefficients(transmittance_bottom, geometry_);
+
+	radiative_layer.reflectance_m_top_cos = R_top[0];
+	radiative_layer.reflectance_m_top_sin = R_top[1];
+	radiative_layer.reflectance_m_bottom_cos = R_bottom[0];
+	radiative_layer.reflectance_m_bottom_sin = R_bottom[1];
+
+	radiative_layer.transmittance_m_top_cos = T_top[0];
+	radiative_layer.transmittance_m_top_sin = T_top[1];
+	radiative_layer.transmittance_m_bottom_cos = T_bottom[0];
+	radiative_layer.transmittance_m_bottom_sin = T_bottom[1];
+
+	return radiative_layer;
+}
+
+inline core::RadiativeLayer RadiativeTransferSolver::initializeSurfaceLayer_(const physics::OpticalLayer& optical_layer)
+{
+	core::RadiativeLayer radiative_layer;
+
+	radiative_layer.reflectance_m_top_cos = std::vector<Eigen::MatrixXd>(geometry_.M + 1, Eigen::MatrixXd::Zero(geometry_.Ntheta, geometry_.Ntheta));
+	radiative_layer.reflectance_m_bottom_cos = std::vector<Eigen::MatrixXd>(geometry_.M + 1, Eigen::MatrixXd::Zero(geometry_.Ntheta, geometry_.Ntheta));
+	radiative_layer.transmittance_m_top_cos = std::vector<Eigen::MatrixXd>(geometry_.M + 1, Eigen::MatrixXd::Zero(geometry_.Ntheta, geometry_.Ntheta));
+	radiative_layer.transmittance_m_bottom_cos = std::vector<Eigen::MatrixXd>(geometry_.M + 1, Eigen::MatrixXd::Zero(geometry_.Ntheta, geometry_.Ntheta));
+	
+	radiative_layer.reflectance_m_top_sin = std::vector<Eigen::MatrixXd>(geometry_.M + 1, Eigen::MatrixXd::Zero(geometry_.Ntheta, geometry_.Ntheta));
+	radiative_layer.reflectance_m_bottom_sin = std::vector<Eigen::MatrixXd>(geometry_.M + 1, Eigen::MatrixXd::Zero(geometry_.Ntheta, geometry_.Ntheta));
+	radiative_layer.transmittance_m_top_sin = std::vector<Eigen::MatrixXd>(geometry_.M + 1, Eigen::MatrixXd::Zero(geometry_.Ntheta, geometry_.Ntheta));
+	radiative_layer.transmittance_m_bottom_sin = std::vector<Eigen::MatrixXd>(geometry_.M + 1, Eigen::MatrixXd::Zero(geometry_.Ntheta, geometry_.Ntheta));
+
+	radiative_layer.source_up = Eigen::VectorXd::Zero(geometry_.Ntheta);
+	radiative_layer.source_down = Eigen::VectorXd::Zero(geometry_.Ntheta);
+
+	radiative_layer.optical_thickness = 1.0E100;
+
+	double s = geometry_.WMU.sum();
+
+	// #pragma omp parallel for
+	for(int e = 0; e < geometry_.Ntheta; e ++)
+	{
+		// 上向き：一定輝度 Bsurf*ε/π
+		radiative_layer.source_up(e) = (1.0 - optical_layer.surface_albedo) * optical_layer.planck_function;
+		// 下向き放射はなし
+		radiative_layer.source_down(e) = 0.0;
+
+		for(int i = 0; i < geometry_.Ntheta; i ++)
+		{
+			radiative_layer.reflectance_m_top_cos[0](e, i) = optical_layer.surface_albedo / s;
+		}
+	}
+
+	return radiative_layer;
+}
+
+inline std::vector<physics::OpticalLayer> RadiativeTransferSolver::setAtmosphericLayerCondition_(const physics::AtmosphereModel& atmosphere_model, double spectral, physics::SpectralCoordinateDimension dimension)
+{
+	int n_layer = atmosphere_model.altitude.size();
+
+	double wavelength;
+	double wavenumber;
+
+	if(dimension == physics::SpectralCoordinateDimension::Wavelength)
+	{
+		wavelength = spectral;
+		wavenumber = 1.0 / spectral;
+	}
+	else if(dimension == physics::SpectralCoordinateDimension::Wavenumber)
+	{
+		wavelength = 1.0 / spectral;
+		wavenumber = spectral;
+	}
+
+	std::vector<physics::OpticalLayer> layers(n_layer);
+	
+	for(int i = 0; i < n_layer; ++i)
+	{
+		io::global().info("RadiativeTransferSolver::setAtmosphericLayerCondition_") << "Setting atmosphere condition for layer " << i << ".";
+		
+		layers[i].is_scattering_species.resize(atmosphere_model.species.size(), false);
+		layers[i].species_absorption_cross_section.resize(atmosphere_model.species.size(), 0.0);
+		layers[i].species_scattering_cross_section.resize(atmosphere_model.species.size(), 0.0);
+		layers[i].species_scattering_phase_function.resize(atmosphere_model.species.size());
+
+		layers[i].enable_atmospheric_emission = atmosphere_model.enable_atmospheric_emission;
+
+		double temperature = atmosphere_model.temperature[i]; // K
+		double pressure = atmosphere_model.pressure[i]; // Pa
+		double physical_thickness = atmosphere_model.altitude_top[i] - atmosphere_model.altitude_bottom[i]; // m
+		// double number_density = atmosphere_model.number_density[i]; // m-3
+
+		layers[i].absorption_coefficient = 0.0;
+		layers[i].scattering_coefficient = 0.0;
+		layers[i].scattering_phase_function.resize(n_scattering_angle_);
+		for(int j = 0; j < n_scattering_angle_; ++j)
+		{
+			double theta = std::numbers::pi / static_cast<double>(n_scattering_angle_ - 1) * static_cast<double>(j);
+			layers[i].scattering_phase_function[j] = {theta, 0.0};
+		}
+
+		if(layers[i].enable_atmospheric_emission)
+		{
+			layers[i].planck_function = computePlanckFunction(spectral, temperature, dimension);
+		}
+
+		for(int j = 0; j < atmosphere_model.species.size(); ++j)
+		{
+			io::global().info("RadiativeTransferSolver::setAtmosphericLayerCondition_") << "Setting atmosphere condition for species " << j << " in layer " << i << ".";
+			
+			double number_density = atmosphere_model.species[j].vertical_number_density_profile[i];
+			double mixing_ratio = atmosphere_model.species[j].vertical_mixing_ratio_profile[i];
+
+			if(atmosphere_model.species[j].species_state == physics::SpeciesState::Aerosol)
+			{
+				auto ri = utils::interpolateTableLinear(spectral, atmosphere_model.species[j].refractive_index[i]);
+				std::complex<double> refractive_index = {ri[0], ri[1]};
+
+				double scattering_cross_section;
+				double absorption_cross_section;
+				double extinction_cross_section;
+				std::vector<std::vector<double>> pf;
+
+				physics::computeMieScatteringSizeDistribution(n_scattering_angle_, wavelength, atmosphere_model.species[j].weight_particle_size_distribution, refractive_index, scattering_cross_section, absorption_cross_section, extinction_cross_section, pf);
+
+				double scattering_coefficient = scattering_cross_section * number_density;
+				double absorption_coefficient = absorption_cross_section * number_density;
+
+				for(int k = 0; k < n_scattering_angle_; ++k)
+				{
+					layers[i].scattering_phase_function[k][1] += pf[k][1] * scattering_coefficient;
+				}
+
+				layers[i].scattering_coefficient += scattering_coefficient;
+				layers[i].absorption_coefficient += absorption_coefficient;
+
+				layers[i].is_scattering_species[j] = true;
+				layers[i].species_scattering_cross_section[j] = scattering_cross_section;
+				layers[i].species_absorption_cross_section[j] = absorption_cross_section;
+				layers[i].species_scattering_phase_function[j] = pf;
+			}
+			else if(atmosphere_model.species[j].species_state == physics::SpeciesState::Molecule)
+			{
+				if(atmosphere_model.species[j].species_type == physics::SpeciesType::Scatterer || atmosphere_model.species[j].species_type == physics::SpeciesType::Extinction)
+				{
+					// double scattering_cross_section = interpolateTableLinear(spectral, atmosphere_model.species[j].scattering_cross_section_spectrum)[0];
+					double scattering_cross_section = atmosphere_model.species[j].scattering_cross_section.cross_section(spectral, temperature);
+					double scattering_coefficient = scattering_cross_section * number_density; // m-1 = m2 / molecule * molecule / m3
+					layers[i].scattering_coefficient += scattering_coefficient;
+					std::vector<std::vector<double>> pf;
+
+					if(atmosphere_model.species[j].scatter_type == physics::ScatterType::Isotropic)
+					{
+						pf = physics::computeIsotropicScatteringFunction(n_scattering_angle_);
+					}
+					else if(atmosphere_model.species[j].scatter_type == physics::ScatterType::Rayleigh)
+					{
+						pf = physics::computeRayleighScatteringFunction(n_scattering_angle_);
+					}
+					else if(atmosphere_model.species[j].scatter_type == physics::ScatterType::HenyeyGreenstein)
+					{
+						pf = physics::computeHGScatteringFunction(n_scattering_angle_, atmosphere_model.species[j].g_factor);
+					}
+
+					// layers[i].species_scattering_cross_section.push_back(scattering_cross_section);
+					// layers[i].species_scattering_phase_function.push_back(pf);
+
+					for(int k = 0; k < n_scattering_angle_; ++k)
+					{
+						layers[i].scattering_phase_function[k][1] += pf[k][1] * scattering_coefficient;
+					}
+
+					layers[i].is_scattering_species[j] = true;
+					layers[i].species_scattering_cross_section[j] = scattering_cross_section;
+					layers[i].species_scattering_phase_function[j] = pf;
+				}
+				
+				if(atmosphere_model.species[j].species_type == physics::SpeciesType::Absorber || atmosphere_model.species[j].species_type == physics::SpeciesType::Extinction)
+				{
+					if(atmosphere_model.species[j].is_hitran)
+					{
+						double absorption_cross_section = 0.0;
+						for(int k = 0; k < atmosphere_model.species[j].lines.size(); ++k)
+						{
+							absorption_cross_section += atmosphere_model.species[j].lines[k].computeCrossSection(wavenumber, temperature, pressure * mixing_ratio, pressure, atmosphere_model.species[j].isotopologue, atmosphere_model.diluent);
+						}
+						double absorption_coefficient = absorption_cross_section * number_density; // m-1 = m2 / molecule * molecule / m3
+						layers[i].absorption_coefficient += absorption_coefficient;
+						layers[i].species_absorption_cross_section[j] = absorption_cross_section;
+					}
+					else
+					{
+						double absorption_cross_section = atmosphere_model.species[j].absorption_cross_section.cross_section(spectral, temperature);
+						double absorption_coefficient = absorption_cross_section * number_density; // m-1 = m2 / molecule * molecule / m3
+						layers[i].absorption_coefficient += absorption_coefficient;
+						layers[i].species_absorption_cross_section[j] = absorption_cross_section;
+					}
+				}
+			}
+		}
+
+		layers[i].optical_thickness = (layers[i].scattering_coefficient + layers[i].absorption_coefficient) * physical_thickness;
+		layers[i].single_scattering_albedo = layers[i].scattering_coefficient / (layers[i].scattering_coefficient + layers[i].absorption_coefficient);
+		physics::normalizeScatteringPhaseFunction(layers[i].scattering_phase_function);
+		layers[i].asymmetry_parameter = physics::computeAsymmetryParameter(layers[i].scattering_phase_function);
+	}
+
+	return layers;
+}
+
+inline physics::OpticalLayer RadiativeTransferSolver::setSurfaceLayerCondition_(const physics::AtmosphereModel& atmosphere_model, double spectral, physics::SpectralCoordinateDimension dimension)
+{
+	double wavelength;
+	double wavenumber;
+
+	if(dimension == physics::SpectralCoordinateDimension::Wavelength)
+	{
+		wavelength = spectral;
+		wavenumber = 1.0 / spectral;
+	}
+	else if(dimension == physics::SpectralCoordinateDimension::Wavenumber)
+	{
+		wavelength = 1.0 / spectral;
+		wavenumber = spectral;
+	}
+
+	physics::OpticalLayer layer;
+
+	layer.enable_atmospheric_emission = atmosphere_model.enable_atmospheric_emission;
+
+	layer.surface_albedo = atmosphere_model.surface_albedo;
+
+	if(layer.enable_atmospheric_emission)
+	{
+		layer.planck_function = computePlanckFunction(spectral, atmosphere_model.surface_temperature, dimension);
+	}
+
+	return layer;
+}
+
+}

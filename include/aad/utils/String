@@ -1,0 +1,51 @@
+#pragma once
+
+#include <string>
+#include <vector>
+#include <algorithm>
+
+namespace aad::utils
+{
+
+std::string toUpper(std::string);
+std::string toLower(std::string);
+std::vector<std::string> splitString(std::string, char);
+
+inline std::string toUpper(std::string s)
+{
+	std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c){return std::toupper(c);});
+	return s;
+}
+
+inline std::string toLower(std::string s)
+{
+	std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c){return std::tolower(c);});
+	return s;
+}
+
+inline std::vector<std::string> splitString(std::string str, char del) 
+{
+	int first = 0;
+	int last = str.find_first_of(del);
+
+	std::vector<std::string> result;
+
+	while (first < str.size())
+	{
+		std::string subStr(str, first, last - first);
+
+		result.push_back(subStr);
+
+		first = last + 1;
+		last = str.find_first_of(del, first);
+
+		if (last == std::string::npos)
+		{
+			last = str.size();
+		}
+	}
+
+	return result;
+}
+
+}

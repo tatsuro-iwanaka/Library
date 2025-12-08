@@ -1,0 +1,616 @@
+#pragma once
+
+#include <complex>
+#include <cmath>
+#include <vector>
+#include <algorithm>
+#include <stdexcept>
+
+#include "Types"
+#include "Constants"
+#include "../utils/Math"
+#include "../io/Logger"
+
+namespace aad::physics
+{
+
+void computeMieScattering(int, double, double, std::complex<double>, double&, double&, double&, std::vector<std::vector<double>>&);
+void computeMieScatteringSizeDistribution(int, double, const std::vector<std::vector<double>>&, std::complex<double>, double&, double&, double&, std::vector<std::vector<double>>&);
+void normalizeScatteringPhaseFunction(std::vector<std::vector<double>>&);
+
+std::vector<std::vector<std::vector<double>>> generateLogNormalSizeDistribution(int, double, double);
+std::vector<std::vector<std::vector<double>>> generateRectangularSizeDistribution(int, double, double);
+std::vector<std::vector<std::vector<double>>> generateGammaSizeDistribution(int, double, double);
+std::vector<std::vector<std::vector<double>>> generateModifiedGammaSizeDistribution(int, double, double, double);
+std::vector<std::vector<std::vector<double>>> generatePowerLawSizeDistribution(int, double, double, double);
+
+double computePhaseFunction(const std::vector<std::vector<double>>&, double);
+std::vector<std::vector<double>> computeIsotropicScatteringFunction(int);
+std::vector<std::vector<double>> computeRayleighScatteringFunction(int);
+std::vector<std::vector<double>> computeHGScatteringFunction(int, double);
+
+double computeAsymmetryParameter(const std::vector<std::vector<double>>&);
+
+inline void computeMieScattering(int n, double radius, double wavelength, std::complex<double> index, double& scattering_cross_section, double& absorption_cross_section, double& extinction_cross_section, std::vector<std::vector<double>>& phase_function)
+{
+	// Input validation
+	if (radius <= 0.0 || wavelength <= 0.0 || n < 2)
+	{
+		scattering_cross_section = 0.0;
+		absorption_cross_section = 0.0;
+		extinction_cross_section = 0.0;
+		phase_function.clear();
+		return;
+	}
+
+	// 1) サイズパラメータ x = π·D/λ
+	double diameter = 2.0 * radius;
+	double x = std::numbers::pi * diameter / wavelength;
+
+	// 2) 級数上限 N_stop
+	int nstop = int(std::floor(x + 4.05 * std::cbrt(x) + 2.0));
+
+	// 3) Riccati–Bessel 商 D_n(z) の計算
+	std::vector<std::complex<double>> DD(nstop + 1);
+
+	{
+		double threshold = (13.78 * index.real() - 10.8) * index.real() + 3.9;
+		auto z = x * index;
+		auto zinv = std::complex<double>(0.0, 0.0);
+	
+		if (std::abs(index.imag() * x) < threshold)
+		{
+			DD[0] = 1.0 / std::tan(z);
+			zinv  = 1.0 / z;
+			for (int i = 1; i <= nstop; ++i)
+			{
+				double k = double(i);
+				auto numerator = k * zinv;
+				DD[i] = 1.0 / (numerator - DD[i - 1]) - numerator;
+			}
+		}
+		else
+		{
+			zinv = 2.0 / z;
+			auto aj = -(nstop + 1.5) * zinv;
+			auto alpha_j1 = aj + 1.0 / ((nstop + 0.5) * zinv);
+			auto alpha_j2 = aj;
+			auto ratio = alpha_j1 / alpha_j2;
+			auto runratio = ((nstop + 0.5) * zinv) * ratio;
+
+			while (std::abs(std::abs(ratio) - 1.0) > 1e-12)
+			{
+				aj = zinv - aj;
+				alpha_j1 = 1.0 / alpha_j1 + aj;
+				alpha_j2 = 1.0 / alpha_j2 + aj;
+				ratio = alpha_j1 / alpha_j2;
+				runratio *= ratio;
+				zinv = -zinv;
+			}
+
+			DD[nstop] = -double(nstop) / z + runratio;
+			zinv = 1.0 / z;
+
+			for (int i = nstop - 1; i >= 0; --i)
+			{
+				double k = double(i + 1);
+				auto num = k * zinv;
+				DD[i] = num - 1.0 / (DD[i + 1] + num);
+			}
+		}
+	}
+
+	// 4) Mie 係数 a_n, b_n と効率 Q の計算
+	std::vector<std::complex<double>> a(nstop), b(nstop);
+	double Qsca = 0.0;
+	double Qext = 0.0;
+
+	{
+		double psi0 = std::sin(x);
+		double psi1 = psi0 / x - std::cos(x);
+	
+		auto xi0 = std::complex<double>(psi0, -std::cos(x));
+		auto xi1 = std::complex<double>(psi1, -(std::cos(x) / x + std::sin(x)));
+
+		// double g = 0.0;
+		// double sign1 = 1.0;
+		// auto s1 = std::complex<double>(0.0, 0.0);
+		// auto s2 = std::complex<double>(0.0, 0.0);
+		// double pi0 = 0.0;
+		// double pi1 = 1.0;
+		// std::complex<double> ann_1(0.0, 0.0);
+		// std::complex<double> bnn_1(0.0, 0.0);
+
+		for (int i = 0; i < nstop; ++i)
+		{
+			a[i] = ((DD[i + 1] / index + double(i + 1) / x) * psi1 - psi0) / ((DD[i + 1] / index + double(i + 1) / x) * xi1 - xi0);
+			b[i] = ((DD[i + 1] * index + double(i + 1) / x) * psi1 - psi0) / ((DD[i + 1] * index + double(i + 1) / x) * xi1 - xi0);
+			
+			//double factor0 = (2.0 * double(i + 1) + 1.0) / double(i + 2) / double(i + 1);
+			//tau = double(i + 1) * mu * pi1 - double(i + 2) * pi0;
+			//double alpha = factor0 * pi1;
+			//double beta = factor0 * tau;
+			
+			//s1 = s1 + alpha * ann + beta * bnn;
+			//s2 = s2 + alpha * bnn + beta * ann;
+			
+			//factor0 = pi1;//((2*n+1)*mu[k]*pi1[k]-(n+1)*pi0[k])/n;
+			//pi1 = ((2.0 * double(i + 1) + 1.0) * mu * pi1 - double(i + 2) * pi0) / double(i + 1);
+			//pi0 = factor0;
+			
+			double factor0 = 2.0 * double(i + 1) + 1.0;
+			
+			//g = g + double(i) / double(i + 1) * (ann_1.real() * ann.real() + ann_1.imag() * ann.imag() + bnn_1.real() * bnn.real() + bnn_1.imag() * bnn.imag());
+			//g = g + factor0 / double(i + 1) / double(i + 2) * (ann.real() * bnn.real() + ann.imag() * bnn.imag());
+			Qsca = Qsca + factor0 * (std::abs(a[i]) * std::abs(a[i]) + std::abs(b[i]) * std::abs(b[i]));
+			Qext = Qext + factor0 * (a[i].real() + b[i].real());
+			
+			//sign1 = -sign1;
+			
+			factor0 = (2.0 * double(i + 1) + 1.0) / x;
+			std::complex<double> xi = factor0 * xi1 - xi0;
+			xi0 = xi1;
+			xi1 = xi;
+			
+			double psi = factor0 * psi1 - psi0;
+			psi0 = psi1;
+			psi1 = xi1.real();
+		}
+	}
+
+	// 5) 無次元効率 Q の正規化
+	Qsca = 2.0 * Qsca / (x * x);
+	Qext = 2.0 * Qext / (x * x);
+	double Qabs = Qext - Qsca;
+
+	// 6) 断面積 [m^2] に変換
+	double area = std::numbers::pi * radius * radius;
+	scattering_cross_section = Qsca * area;
+	absorption_cross_section = Qabs * area;
+	extinction_cross_section = Qext * area;
+
+	// 7) 位相関数の計算
+	phase_function.clear();
+	phase_function.resize(n);
+	double dtheta = std::numbers::pi / double(n - 1);
+
+	//#pragma omp parallel for
+	for (int k = 0; k < n; ++k)
+	{
+		double theta = dtheta * double(k);
+		double mu = std::cos(theta);
+
+		std::complex<double> S1(0.0, 0.0);
+		std::complex<double> S2(0.0, 0.0);
+		double pi0 = 0.0;
+		double pi1 = 1.0;
+
+		for (int i = 0; i < nstop; ++i)
+		{
+			double weight = (2.0 * double(i + 1) + 1.0) / double(i + 2) / double(i + 1);
+			double tau = double(i + 1) * mu * pi1 - double(i + 2) * pi0;
+			// double tau = n_i * mu * pi1 - (n_i + 1) * pi0;
+
+			S1 += weight * (a[i] * pi1 + b[i] * tau);
+			S2 += weight * (b[i] * pi1 + a[i] * tau);
+
+			double pi2 = ((2.0 * double(i + 1) + 1.0) * mu * pi1 - double(i + 2) * pi0) / double(i + 1);
+			pi0 = pi1;
+			pi1 = pi2;
+		}
+
+		double s11 = 0.5 * (std::norm(S2) + std::norm(S1));
+		// double s12 = 0.5 * (std::norm(S2) - std::norm(S1));
+		// double pol = -s12 / s11;
+		// double s33 = (S2 * std::conj(S1)).real();
+		// double s34 = (S2 * std::conj(S1)).imag();
+		double natural = s11 / (std::numbers::pi * x * x * Qsca);
+		//double P11 = s11 / (std::numbers::pi * x * x * Qsca);
+
+		phase_function[k] = {theta, natural * 4.0 * std::numbers::pi};
+	}
+
+	return;
+}
+
+inline void computeMieScatteringSizeDistribution(int n_theta, double wavelength, const std::vector<std::vector<double>>& weight, std::complex<double> index, double& scattering_cross_section, double& absorption_cross_section, double& extinction_cross_section, std::vector<std::vector<double>>& phase_function)
+{
+	int n_r = weight.size();
+	// std::vector<double> scs(n_r);
+	// std::vector<double> acs(n_r);
+	// std::vector<std::vector<std::vector<double>>> pf(n_r, std::vector<std::vector<double>>(n_theta, std::vector<double>(2)));
+
+	double denom = 0.0;
+
+	absorption_cross_section = 0.0;
+	scattering_cross_section = 0.0;
+	extinction_cross_section = 0.0;
+	phase_function = std::vector<std::vector<double>>(n_theta, std::vector<double>(2, 0.0));
+
+	double dtheta = std::numbers::pi / static_cast<double>(n_theta - 1);
+	for (int i = 0; i < n_theta; ++i)
+	{
+		phase_function[i][0] = dtheta * double(i);
+	}
+
+	for(int i = 0; i < n_r; ++i)
+	{
+		double scs, acs, ecs;
+		std::vector<std::vector<double>> pf;
+		double n_dr = weight[i][1];
+		computeMieScattering(n_theta, weight[i][0], wavelength, index, scs, acs, ecs, pf);
+		absorption_cross_section += acs * n_dr;
+		scattering_cross_section += scs * n_dr;
+		extinction_cross_section += ecs * n_dr;
+		denom += n_dr;
+
+		for(int j = 0; j < n_theta; ++j)
+		{
+			phase_function[j][1] += pf[j][1] * scs * n_dr;
+		}
+	}
+
+	absorption_cross_section /= denom;
+	scattering_cross_section /= denom;
+	extinction_cross_section /= denom;
+	
+	normalizeScatteringPhaseFunction(phase_function);
+
+	return;
+}
+
+inline void normalizeScatteringPhaseFunction(std::vector<std::vector<double>> &f)
+{
+	std::vector<std::vector<double>> phase_function_theta(f.size());
+
+	for(int i = 0; i < f.size(); i ++)
+	{
+		phase_function_theta[i] = {f[i][0], f[i][1] * 2.0 * std::numbers::pi * std::sin(f[i][0])};
+	}
+
+	double sum = utils::computeSimpsonIntegration(phase_function_theta) / (4.0 * std::numbers::pi);
+
+	for(int i = 0; i < f.size(); i ++)
+	{
+		f[i][1] /= sum;
+	}
+
+	return;
+}
+
+
+inline std::vector<std::vector<std::vector<double>>> generateLogNormalSizeDistribution(int n_r, double r_g, double sigma_g)
+{
+	std::vector<std::vector<double>> size_distribution(n_r, std::vector<double>(2));
+	std::vector<std::vector<double>> weight(n_r, std::vector<double>(2));
+
+	if (n_r <= 0 || r_g <= 0.0 || sigma_g <= 0.0)
+	{
+		if (sigma_g <= 0.0)
+		{
+			io::global().fatal("generateLogNormalSizeDistribution") << "sigma_g must be positive.";
+			throw std::runtime_error("[generateLogNormalSizeDistribution] sigma_g must be positive.");
+		}
+	}
+
+	std::vector<std::vector<double>> node_weight_hermite = utils::computeGaussHermiteQuadratureNodeWeight(n_r);
+	
+	double ln_rg = std::log(r_g);
+	double sigma_ln = sigma_g;
+	
+	double sqrt_2_sigma_ln = std::sqrt(2.0) * sigma_ln;
+
+	double weight_prefactor = 1.0 * std::numbers::inv_sqrtpi;
+
+	// double pdf_norm_factor = 1.0 / (std::sqrt(2.0 * std::numbers::pi) * sigma_ln);
+	double pdf_norm_factor = 1.0 / (std::numbers::sqrt2 * sigma_ln) * std::numbers::inv_sqrtpi;
+
+	for (int i = 0; i < n_r; ++i)
+	{
+		double u_std = node_weight_hermite[i][0];
+		double w_std = node_weight_hermite[i][1];
+		
+		double r = std::exp(ln_rg + sqrt_2_sigma_ln * u_std);
+		double ln_ratio = std::log(r / r_g); 
+		
+		double exponent = -(ln_ratio * ln_ratio) / (2.0 * sigma_ln * sigma_ln);
+
+		size_distribution[i][0] = r;
+		weight[i][0] = r; 
+		size_distribution[i][1] = (pdf_norm_factor / r) * std::exp(exponent);
+		weight[i][1] = w_std * weight_prefactor;
+	}
+
+	return {size_distribution, weight};
+}
+
+inline std::vector<std::vector<std::vector<double>>> generateRectangularSizeDistribution(int n_r, double r_mean, double width)
+{
+	std::vector<std::vector<double>> size_distribution(n_r, std::vector<double>(2));
+	std::vector<std::vector<double>> weight(n_r, std::vector<double>(2));
+
+	if (n_r <= 0 || width <= 0.0)
+	{
+		io::global().fatal("generateRectangularSizeDistribution") << "Invalid input parameters (n_r <= 0 or width <= 0).";
+		throw std::runtime_error("[generateRectangularSizeDistribution] Invalid input parameters (n_r <= 0 or width <= 0).");
+	}
+
+	double r_min = r_mean - 0.5 * width;
+	double r_max = r_mean + 0.5 * width;
+
+	if (r_min < 0.0)
+	{
+		io::global().fatal("generateRectangularSizeDistribution") << "Rectangular distribution extends to negative radius (r_min < 0). Adjust r_mean or width.";
+		throw std::runtime_error("[generateRectangularSizeDistribution] Rectangular distribution extends to negative radius (r_min < 0). Adjust r_mean or width.");
+	}
+
+	std::vector<std::vector<double>> node_weight_std = utils::computeGaussLegendreQuadratureNodeWeight(n_r);
+	
+	double n_r_val = 1.0 / (r_max - r_min); 
+
+	for (int i = 0; i < n_r; ++i)
+	{
+		double x_std = node_weight_std[i][0];
+		double w_std = node_weight_std[i][1];
+
+		double r = 0.5 * (r_max - r_min) * x_std + 0.5 * (r_max + r_min);
+
+		size_distribution[i][0] = r;
+		weight[i][0] = r;
+		size_distribution[i][1] = n_r_val;
+		weight[i][1] = w_std * 0.5;
+	}
+
+	return {size_distribution, weight};
+}
+
+inline std::vector<std::vector<std::vector<double>>> generateGammaSizeDistribution(int n_r, double a, double b)
+{
+	std::vector<std::vector<double>> size_distribution(n_r, std::vector<double>(2));
+	std::vector<std::vector<double>> weight(n_r, std::vector<double>(2));
+
+	if (n_r <= 0 || a <= 0.0 || b <= 0.0)
+	{
+		io::global().fatal("generateGammaSizeDistribution") << "Parameters a and b must be positive.";
+		throw std::runtime_error("[generateGammaSizeDistribution] Parameters a and b must be positive.");
+	}
+	
+	if ((1 - b) / b <= 0.0)
+	{
+		io::global().fatal("generateGammaSizeDistribution") << "(1 - 2b) / b must be positive for convergence. Check parameter b.";
+		throw std::runtime_error("[generateGammaSizeDistribution] (1 - 2b) / b must be positive for convergence. Check parameter b.");
+	}
+
+	std::vector<std::vector<double>> node_weight_laguerre = utils::computeGaussLaguerreQuadratureNodeWeight(n_r);
+	
+	double norm_const = 1.0 / (a * b * std::tgamma((1.0 - 2.0 * b) / b));
+
+	for (int i = 0; i < n_r; ++i)
+	{
+		double x_laguerre = node_weight_laguerre[i][0];
+		double w_laguerre = node_weight_laguerre[i][1];
+
+		double r = a * b * x_laguerre;
+		if (r < 1e-12)
+		{
+			r = 1e-12;
+		}
+
+		size_distribution[i][0] = r;
+		weight[i][0] = r;
+		size_distribution[i][1] = norm_const * std::pow(r / a / b, (1.0 - 3.0 * b) / b) * std::exp(-r / a / b);
+		weight[i][1] = 1.0 / std::tgamma((1.0 - 2.0 * b) / b) * w_laguerre * std::pow(x_laguerre, (1.0 - 3.0 * b) / b);
+	}
+
+	return {size_distribution, weight};
+}
+
+inline std::vector<std::vector<std::vector<double>>> generateModifiedGammaSizeDistribution(int n_r, double r_c, double alpha, double gamma)
+{
+	std::vector<std::vector<double>> size_distribution(n_r, std::vector<double>(2));
+	std::vector<std::vector<double>> weight(n_r, std::vector<double>(2));
+
+	if (n_r <= 0 || r_c <= 0.0 || alpha <= 0.0 || gamma <= 0.0)
+	{
+		io::global().fatal("generateModifiedGammaSizeDistribution") << "Parameters must be positive.";
+		throw std::runtime_error("[generateModifiedGammaSizeDistribution] Parameters must be positive.");
+	}
+	
+	std::vector<std::vector<double>> node_weight_laguerre = utils::computeGeneralizedGaussLaguerreQuadratureNodeWeight(n_r, (alpha - gamma + 1.0) / gamma);
+	
+	double norm_const = gamma / (r_c * std::tgamma((alpha + 1.0) / gamma)) * std::pow(alpha / gamma, (alpha + 1) / gamma);
+	
+	for (int i = 0; i < n_r; ++i)
+	{
+		double x_laguerre = node_weight_laguerre[i][0];
+		double w_laguerre = node_weight_laguerre[i][1];
+
+		double r;
+		if (x_laguerre == 0.0)
+		{
+			r = 0.0;
+		}
+		else
+		{
+			r = r_c * std::pow((gamma / alpha) * x_laguerre, 1.0 / gamma);
+		}
+		
+		if (r < 1e-12)
+		{
+			r = 1e-12;
+		}
+
+		size_distribution[i][0] = r;
+		weight[i][0] = r;
+		size_distribution[i][1] = norm_const * std::pow(r / r_c, alpha) * std::exp(-alpha / gamma * std::pow(r / r_c, gamma));
+		weight[i][1] = w_laguerre / std::tgamma((alpha + 1.0) / gamma);
+	}
+
+	return {size_distribution, weight};
+}
+
+inline std::vector<std::vector<std::vector<double>>> generatePowerLawSizeDistribution(int n_r, double pl_delta, double pl_r1, double pl_r2)
+{
+	std::vector<std::vector<double>> size_distribution(n_r, std::vector<double>(2));
+	std::vector<std::vector<double>> weight(n_r, std::vector<double>(2));
+
+	if (n_r <= 0 || pl_r1 <= 0.0 || pl_r2 <= 0.0 || pl_r1 >= pl_r2)
+	{
+		io::global().fatal("generatePowerLawSizeDistribution") << "Invalid limits or parameters (r1 >= r2).";
+		throw std::runtime_error("[generatePowerLawSizeDistribution] Invalid limits or parameters (r1 >= r2).");
+	}
+
+	double ln_r_min = std::log(pl_r1);
+	double ln_r_max = std::log(pl_r2);
+
+	std::vector<std::vector<double>> node_weight_std = utils::computeGaussLegendreQuadratureNodeWeight(n_r);
+	
+	double diff = ln_r_max - ln_r_min;
+	double sum_limits = ln_r_max + ln_r_min;
+	double jacobian = 0.5 * diff;
+	
+	double c;
+	if (std::abs(pl_delta - 1.0) < 1e-9)
+	{
+		c = 1.0 / diff;
+	}
+	else
+	{
+		double term_nu = 1.0 - pl_delta;
+		c = term_nu / (std::pow(pl_r2, term_nu) - std::pow(pl_r1, term_nu));
+	}
+
+	for (int i = 0; i < n_r; ++i)
+	{
+		double x_std = node_weight_std[i][0];
+		double w_std = node_weight_std[i][1];
+
+		double ln_r = 0.5 * diff * x_std + 0.5 * sum_limits;
+		double r = std::exp(ln_r);
+
+		double n_r_val = c * std::pow(r, -pl_delta);
+		double dr = r * w_std * jacobian;
+		
+		size_distribution[i][0] = r;
+		weight[i][0] = r;
+		size_distribution[i][1] = n_r_val;
+		weight[i][1] = n_r_val * dr;
+	}
+
+	return {size_distribution, weight};
+}
+
+inline double computePhaseFunction(const std::vector<std::vector<double>>& f, double scattering_angle)
+{
+	double theta_min = f[0][0];
+	double theta_max = f[f.size() - 1][0];
+	double dtheta = std::abs(f[1][0] - f[0][0]);
+
+	int ntheta = (scattering_angle - theta_min) / dtheta;
+	double result;
+
+	if(ntheta == f.size() - 1)
+	{
+		result = f[ntheta][1];
+	}
+	else if(ntheta == 0)
+	{
+		result = f[0][1];
+	}
+	else
+	{
+		result = (f[ntheta][1] * (f[ntheta + 1][0] - scattering_angle) + f[ntheta + 1][1] * (scattering_angle - f[ntheta][0])) / (f[ntheta + 1][0] - f[ntheta][0]);
+	}
+	
+	return result;
+}
+
+inline std::vector<std::vector<double>> computeIsotropicScatteringFunction(int ntheta)
+{
+	if(ntheta % 2 == 0)
+	{
+		ntheta ++;
+	}
+
+	std::vector<std::vector<double>> phase_function(ntheta);
+
+	for(int i = 0; i < ntheta; i ++)
+	{
+		double theta = std::numbers::pi * double(i) / double(ntheta - 1);
+		phase_function[i] = {theta, 1.0};
+	}
+
+	return phase_function;
+}
+
+inline std::vector<std::vector<double>> computeRayleighScatteringFunction(int ntheta)
+{
+	if(ntheta % 2 == 0)
+	{
+		ntheta ++;
+	}
+
+	std::vector<std::vector<double>> phase_function(ntheta);
+
+	for(int i = 0; i < ntheta; i ++)
+	{
+		double theta = std::numbers::pi * double(i) / double(ntheta - 1);
+		phase_function[i] = {theta, 3.0 / 4.0 * (1.0 + std::cos(theta) * std::cos(theta))};
+	}
+
+	return phase_function;
+}
+
+inline std::vector<std::vector<double>> computeHGScatteringFunction(int ntheta, double g)
+{
+	if(ntheta % 2 == 0)
+	{
+		ntheta ++;
+	}
+
+	std::vector<std::vector<double>> phase_function(ntheta);
+
+	for(int i = 0; i < ntheta; i ++)
+	{
+		double theta = std::numbers::pi * double(i) / double(ntheta - 1);
+		phase_function[i] = {theta, (1.0 - g * g) / std::pow(1 + g * g - 2.0 * g * std::cos(theta), 1.5)};
+	}
+
+	return phase_function;
+}
+
+inline double computeAsymmetryParameter(const std::vector<std::vector<double>>& f)
+{
+	double g = 0.0;
+
+	int n = f.size();
+
+	double num = 0.0;
+	double den = 0.0;
+
+	// double dtheta = f[1][0] - f[0][0];
+
+	for(int i = 0; i < n; i ++)
+	{
+		double theta = f[i][0];
+		double mu = std::cos(theta);
+		double sine = std::sin(theta);
+
+		if(i == 0 || i == n - 1)
+		{
+			num += f[i][1] * mu * sine;
+			den += f[i][1] * sine;
+		}
+		else
+		{
+			num += 2.0 * f[i][1] * mu * sine;
+			den += 2.0 * f[i][1] * sine;
+		}
+	}
+
+	g = num / den;
+
+	return g;
+}
+
+}

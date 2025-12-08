@@ -1,0 +1,1244 @@
+#pragma once
+
+#include <algorithm>
+
+#include "../Core"
+#include "../physics/Types"
+#include "../physics/Atmosphere"
+#include "../physics/HITRAN"
+#include "../physics/VIRA"
+#include "../physics/Constants"
+#include "../physics/CrossSection"
+#include "../physics/Scattering"
+#include "../physics/Units"
+#include "../physics/Spectral"
+#include "../io/Config"
+#include "../io/Import"
+#include "../utils/Math"
+#include "../utils/String"
+
+namespace aad
+{
+
+class ModelBuilder
+{
+	public:
+		static physics::AtmosphereModel buildAtmosphereModel(const physics::Configuration&, const physics::SpectralInformation&);
+		static core::Geometry buildGeometry(const physics::Configuration&);
+		static physics::SpectralInformation buildSpectral(const physics::Configuration&);
+		static physics::DeltaApproximation buildDeltaApproximation(const physics::Configuration&);
+		static physics::SimulationInformation buildSimulation(const physics::Configuration&);
+
+	private:
+		static std::vector<physics::Species> buildSpecies_(const physics::Configuration&, const physics::AtmosphereModel&, const physics::SpectralInformation&);
+		// static double interpolateVerticalProfile(double, const std::vector<std::vector<double>>&, physics::VerticalProfileInterpolation);
+};
+
+inline std::vector<physics::Species> ModelBuilder::buildSpecies_(const physics::Configuration& configuration, const physics::AtmosphereModel& atmosphere_model, const physics::SpectralInformation& spectral)
+{
+	int n_species = configuration.atmosphere.species_configuration.size();
+	int n_layers = atmosphere_model.altitude.size();
+
+	std::vector<physics::Species> species;
+
+	netCDF::NcFile nc_hitran;
+
+	if(atmosphere_model.is_hitran == true)
+	{
+		nc_hitran.open(configuration.atmosphere.filename_hitran.value(), netCDF::NcFile::read);
+	}
+
+	for(int i = 0; i < n_species; ++i)
+	{
+		physics::Species s;
+		auto s_input = configuration.atmosphere.species_configuration[i];
+		s.name = s_input.name.value();
+		s.species_state = s_input.species_state.value();
+
+		s.is_hitran = false;
+
+		// 鉛直分布も忘れずに実装
+		s.vertical_number_density_profile.resize(n_layers);
+		s.vertical_mixing_ratio_profile.resize(n_layers);
+		auto unit_type = physics::getUnitInfo(s_input.unit_vertical_profile[1].value());
+		std::string input_unit_val = s_input.unit_vertical_profile[1].value();
+		std::string input_unit_alt = s_input.unit_vertical_profile[0].value();
+
+		for (int j = 0; j < n_layers; ++j)
+		{
+			double z_target = atmosphere_model.altitude[j]; // 目標高度 [m]
+			double air_density = atmosphere_model.number_density[j]; // 大気数密度 [m-3]
+			double dz = atmosphere_model.altitude_top[j] - atmosphere_model.altitude_bottom[j]; // 層厚 [m]
+
+			// 2. 入力データから、その高度における「生の値」を取得・補間
+			double raw_value = 0.0;
+
+			if (s_input.is_same_layering_atmosphere)
+			{
+				raw_value = s_input.vertical_profile[j][0];
+			}
+			else
+			{
+				// 層構造が違うなら、高度を使って補間
+				// 入力の高度単位に合わせて z_target を変換 (m -> input_unit)
+				double z_query = z_target * physics::scaleUnit("m", input_unit_alt);
+				raw_value = interpolateVerticalProfile(z_query, s_input.vertical_profile, s_input.vertical_profile_interpolation.value());
+			}
+
+			// 3. 単位と物理量に応じた変換 (数密度と混合比の両方を埋める)
+			if (unit_type.dim == physics::UnitDim::Dimensionless) // Mixing Ratio
+			{
+				// 入力は混合比
+				double mixing_ratio = raw_value * physics::scaleUnit(input_unit_val, "mol/mol"); // 単位変換
+				
+				s.vertical_mixing_ratio_profile[j] = mixing_ratio;
+				s.vertical_number_density_profile[j] = mixing_ratio * air_density;
+			}
+			else if (unit_type.dim == physics::UnitDim::NumberDensity) // Number Density
+			{
+				// 入力は数密度
+				double number_density = raw_value * physics::scaleUnit(input_unit_val, "m-3");
+
+				s.vertical_number_density_profile[j] = number_density;
+				s.vertical_mixing_ratio_profile[j] = number_density / air_density;
+			}
+			else if (unit_type.dim == physics::UnitDim::ColumnNumberDensity) // Column Density
+			{
+				// 入力はカラム密度 [m-2]
+				// 数密度 [m-3] = カラム密度 [m-2] / 層厚 [m]
+				double col_density = raw_value * physics::scaleUnit(input_unit_val, "m-2");
+				double number_density = col_density / dz;
+
+				s.vertical_number_density_profile[j] = number_density;
+				s.vertical_mixing_ratio_profile[j] = number_density / air_density;
+			}
+		}
+
+		if(s.species_state == physics::SpeciesState::Molecule)
+		{
+			s.species_type = s_input.species_type.value();
+
+			if(s.species_type == physics::SpeciesType::Scatterer || s.species_type == physics::SpeciesType::Extinction)
+			{
+				s.scatter_type = s_input.scatter_type.value();
+
+				if(s_input.scattering_cross_section_type.value() == physics::CrossSectionType::Constant)
+				{
+					//s.scattering_cross_section_spectrum = {{spectral.spectral_grid.front() - 1.0, s_input.scattering_cross_section.value() * physics::scaleUnit(s_input.scattering_cross_section_unit.value(), "m2")}, {spectral.spectral_grid.back() + 1.0, s_input.scattering_cross_section.value() * physics::scaleUnit(s_input.scattering_cross_section_unit.value(), "m2")}};
+
+					std::vector<double> spectral_ = {spectral.spectral_grid.front() - 1.0, spectral.spectral_grid.back() + 1.0};
+					std::vector<double> temperature = {298.0};
+					std::vector<std::vector<double>> cross_section = {{s_input.scattering_cross_section.value() * physics::scaleUnit(s_input.scattering_cross_section_unit.value(), "m2")}, {s_input.scattering_cross_section.value() * physics::scaleUnit(s_input.scattering_cross_section_unit.value(), "m2")}};
+
+					s.scattering_cross_section.loadVectors(spectral_, temperature, cross_section);
+				}
+				else if(s_input.scattering_cross_section_type.value() == physics::CrossSectionType::External)
+				{
+					// 外部ファイルを読み込み
+					// 読み込んだ配列 std::vector<std::vector<double>> loaded_data ({spectral, scattering_cross_section}の配列)
+					// std::vector<std::vector<double>> loaded_data;
+
+					// if(spectral.spectral_dimension == SpectralCoordinateDimension::Wavelength)
+					// {
+					// 	loaded_data = loadSpectralFile(s_input.filename_scattering_cross_section.value(), s_input.varname_scattering_cross_section_spectral.value(), s_input.varname_scattering_cross_section.value(), "m", "m2");
+					// }
+					// else if(spectral.spectral_dimension == SpectralCoordinateDimension::Wavenumber)
+					// {
+					// 	loaded_data = loadSpectralFile(s_input.filename_scattering_cross_section.value(), s_input.varname_scattering_cross_section_spectral.value(), s_input.varname_scattering_cross_section.value(), "m-1", "m2");
+					// }
+
+					// for(int j = 0; j < loaded_data.size(); ++j)
+					// {
+					// 	s.scattering_cross_section_spectrum = loaded_data;
+					// }
+
+					if(spectral.spectral_dimension == physics::SpectralCoordinateDimension::Wavelength)
+					{
+						s.scattering_cross_section.loadNetCDF(s_input.filename_scattering_cross_section.value(), s_input.varname_scattering_cross_section_spectral.value(), s_input.varname_scattering_cross_section_temperature.value(), s_input.varname_scattering_cross_section.value(), "m", "K", "m2");
+					}
+					else if(spectral.spectral_dimension == physics::SpectralCoordinateDimension::Wavenumber)
+					{
+						s.scattering_cross_section.loadNetCDF(s_input.filename_scattering_cross_section.value(), s_input.varname_scattering_cross_section_spectral.value(), s_input.varname_scattering_cross_section_temperature.value(), s_input.varname_scattering_cross_section.value(), "m-1", "K", "m2");
+					}
+				}
+
+				if(s.scatter_type == physics::ScatterType::HenyeyGreenstein)
+				{
+					s.g_factor = s_input.g_factor.value();
+				}
+			}
+
+			if(s.species_type == physics::SpeciesType::Absorber || s.species_type == physics::SpeciesType::Extinction)
+			{
+				if(s_input.absorption_cross_section_type.value() == physics::CrossSectionType::Constant)
+				{
+					std::vector<double> spectral_ = {spectral.spectral_grid.front() - 1.0, spectral.spectral_grid.back() + 1.0};
+					std::vector<double> temperature = {298.0};
+					std::vector<std::vector<double>> cross_section = {{s_input.absorption_cross_section.value() * physics::scaleUnit(s_input.absorption_cross_section_unit.value(), "m2")}, {s_input.absorption_cross_section.value() * physics::scaleUnit(s_input.absorption_cross_section_unit.value(), "m2")}};
+
+					s.absorption_cross_section.loadVectors(spectral_, temperature, cross_section);
+				}
+				else if(s_input.absorption_cross_section_type.value() == physics::CrossSectionType::External)
+				{
+					// 外部ファイルを読み込み
+					// 読み込んだ配列 std::vector<std::vector<double>> loaded_data ({spectral, absorption_cross_section}の配列)
+					// std::vector<std::vector<double>> loaded_data;
+
+					// if(spectral.spectral_dimension == SpectralCoordinateDimension::Wavelength)
+					// {
+					// 	loaded_data = loadSpectralFile(s_input.filename_absorption_cross_section.value(), s_input.varname_absorption_cross_section_spectral.value(), s_input.varname_absorption_cross_section.value(), "m", "m2");
+					// }
+					// else if(spectral.spectral_dimension == SpectralCoordinateDimension::Wavenumber)
+					// {
+					// 	loaded_data = loadSpectralFile(s_input.filename_absorption_cross_section.value(), s_input.varname_absorption_cross_section_spectral.value(), s_input.varname_absorption_cross_section.value(), "m-1", "m2");
+					// }
+
+					// for(int j = 0; j < loaded_data.size(); ++j)
+					// {
+					// 	s.absorption_cross_section_spectrum = loaded_data;
+					// }
+
+					if(spectral.spectral_dimension == physics::SpectralCoordinateDimension::Wavelength)
+					{
+						s.absorption_cross_section.loadNetCDF(s_input.filename_absorption_cross_section.value(), s_input.varname_absorption_cross_section_spectral.value(), s_input.varname_absorption_cross_section_temperature.value(), s_input.varname_absorption_cross_section.value(), "m", "K", "m2");
+					}
+					else if(spectral.spectral_dimension == physics::SpectralCoordinateDimension::Wavenumber)
+					{
+						s.absorption_cross_section.loadNetCDF(s_input.filename_absorption_cross_section.value(), s_input.varname_absorption_cross_section_spectral.value(), s_input.varname_absorption_cross_section_temperature.value(), s_input.varname_absorption_cross_section.value(), "m-1", "K", "m2");
+					}
+				}
+				else if(s_input.absorption_cross_section_type.value() == physics::CrossSectionType::HITRAN)
+				{
+					s.is_hitran = true;
+				}
+			}
+		}
+		else if(s.species_state == physics::SpeciesState::Aerosol)
+		{
+			s.scatter_type = s_input.scatter_type.value();
+
+			if(s.scatter_type == physics::ScatterType::Mie)
+			{
+				s.refractive_index.resize(n_layers);
+
+				if(s_input.refractive_index_type.value() == physics::RefractiveIndexType::Constant)
+				{
+					for(int j = 0; j < n_layers; ++j)
+					{
+						s.refractive_index[j] = {{spectral.spectral_grid.front() - 1.0, s_input.nr.value(), s_input.ni.value()}, {spectral.spectral_grid.back() + 1.0, s_input.nr.value(), s_input.ni.value()}};
+					}
+				}
+				else if(s_input.refractive_index_type.value() == physics::RefractiveIndexType::Spectral)
+				{
+					// 外部ファイル読み込み
+					// 読み込んだ配列 std::vector<std::vector<double>> loaded_data ({spectral, nr, ni}の配列)
+
+					std::vector<std::vector<double>> loaded_data;
+
+					if(spectral.spectral_dimension == physics::SpectralCoordinateDimension::Wavelength)
+					{
+						loaded_data = io::loadRefractiveIndexSpectralFile(s_input.filename_refractive_index_spectral.value(), s_input.varname_refractive_index_spectral_spectral.value(), s_input.varname_refractive_index_spectral_nr.value(), s_input.varname_refractive_index_spectral_ni.value(), "m");
+					}
+					else if(spectral.spectral_dimension == physics::SpectralCoordinateDimension::Wavenumber)
+					{
+						loaded_data = io::loadRefractiveIndexSpectralFile(s_input.filename_refractive_index_spectral.value(), s_input.varname_refractive_index_spectral_spectral.value(), s_input.varname_refractive_index_spectral_nr.value(), s_input.varname_refractive_index_spectral_ni.value(), "m-1");
+					}
+
+					for(int j = 0; j < n_layers; ++j)
+					{
+						s.refractive_index[j] = loaded_data;
+					}
+				}
+				else if(s_input.refractive_index_type.value() == physics::RefractiveIndexType::Vertical)
+				{
+					if(s_input.is_refractive_index_same_layering_atmosphere == true)
+					{
+						for(int j = 0; j < n_layers; ++j)
+						{
+							s.refractive_index[j] = {{spectral.spectral_grid.front() - 1.0, s_input.refractive_index_vertical_profile[j][0], s_input.refractive_index_vertical_profile[j][1]}, {spectral.spectral_grid.back() + 1.0, s_input.refractive_index_vertical_profile[j][0], s_input.refractive_index_vertical_profile[j][1]}};
+						}
+					}
+					else
+					{
+						std::vector<std::vector<double>> nr_input(s_input.refractive_index_vertical_profile.size(), std::vector<double>(2, 0.0));
+						std::vector<std::vector<double>> ni_input(s_input.refractive_index_vertical_profile.size(), std::vector<double>(2, 0.0));
+
+						for(int j = 0; j < s_input.refractive_index_vertical_profile.size(); ++j)
+						{
+							nr_input[j] = {s_input.refractive_index_vertical_profile[j][0] * physics::scaleUnit(s_input.unit_refractive_index_vertical_profile.value(), "m"), s_input.refractive_index_vertical_profile[j][1]};
+							ni_input[j] = {s_input.refractive_index_vertical_profile[j][0] * physics::scaleUnit(s_input.unit_refractive_index_vertical_profile.value(), "m"), s_input.refractive_index_vertical_profile[j][2]};
+						}
+
+						auto itp = s_input.refractive_index_vertical_profile_interpolation.value();
+
+						for(int j = 0; j < n_layers; ++j)
+						{
+							double alt = atmosphere_model.altitude[j];
+							s.refractive_index[j] = {{spectral.spectral_grid.front() - 1.0, interpolateVerticalProfile(alt, nr_input, itp), interpolateVerticalProfile(alt, ni_input, itp)}, {spectral.spectral_grid.back() + 1.0, interpolateVerticalProfile(alt, nr_input, itp), interpolateVerticalProfile(alt, ni_input, itp)}};
+						}
+					}
+				}
+				else if(s_input.refractive_index_type.value() == physics::RefractiveIndexType::SpectralVertical)
+				{
+					// 外部ファイル読み込み
+					// 読み込んだ配列 std::vector<std::vector<std::vector<double>>> loaded_data ({altitude, spectral, nr, ni}の配列)
+					// loaded_data[n_alt][n_spec] = {alt, spec, nr, ni}
+					std::vector<std::vector<std::vector<double>>> loaded_data;
+					if(spectral.spectral_dimension == physics::SpectralCoordinateDimension::Wavelength)
+					{
+						loaded_data = io::loadRefractiveIndexSpectralVerticalFile(s_input.filename_refractive_index_spectral_vertical.value(), s_input.varname_refractive_index_spectral_vertical_altitude.value(), s_input.varname_refractive_index_spectral_vertical_spectral.value(), s_input.varname_refractive_index_spectral_vertical_nr.value(), s_input.varname_refractive_index_spectral_vertical_ni.value(), "m", "m");
+					}
+					else if(spectral.spectral_dimension == physics::SpectralCoordinateDimension::Wavenumber)
+					{
+						loaded_data = io::loadRefractiveIndexSpectralVerticalFile(s_input.filename_refractive_index_spectral_vertical.value(), s_input.varname_refractive_index_spectral_vertical_altitude.value(), s_input.varname_refractive_index_spectral_vertical_spectral.value(), s_input.varname_refractive_index_spectral_vertical_nr.value(), s_input.varname_refractive_index_spectral_vertical_ni.value(), "m", "m-1");
+					}
+
+					// 入力データの高度リストを作成（検索用）
+					std::vector<double> input_alts(loaded_data.size());
+					for(const auto& layer : loaded_data)
+					{
+						input_alts.push_back(layer[0][0]);
+					}
+
+					s.refractive_index.resize(n_layers);
+					auto itp_method = s_input.refractive_index_vertical_profile_interpolation.value();
+
+					// 各計算レイヤーに対して
+					for(int j = 0; j < n_layers; ++j)
+					{
+						double target_alt = atmosphere_model.altitude[j];
+
+						// 補間を行う2つの入力層を探す (lower_bound)
+						// it は target_alt 以上の最初の要素を指す
+						auto it = std::lower_bound(input_alts.begin(), input_alts.end(), target_alt);
+
+						// 補間結果を格納するベクタを準備
+						size_t n_spec = loaded_data[0].size();
+						s.refractive_index[j].resize(n_spec);
+
+						if (it == input_alts.begin()) 
+						{
+							// 範囲外(下): 一番下の層をコピー
+							const auto& src = loaded_data.front();
+
+							for(size_t k=0; k<n_spec; ++k)
+							{
+								s.refractive_index[j][k] = {src[k][1], src[k][2], src[k][3]};
+							}
+						}
+						else if (it == input_alts.end()) 
+						{
+							// 範囲外(上): 一番上の層をコピー
+							const auto& src = loaded_data.back();
+
+							for(size_t k=0; k<n_spec; ++k)
+							{
+								s.refractive_index[j][k] = {src[k][1], src[k][2], src[k][3]};
+							}
+						}
+						else
+						{
+							// 範囲内
+							size_t idx_upper = std::distance(input_alts.begin(), it);
+							size_t idx_lower = idx_upper - 1;
+
+							double z0 = input_alts[idx_lower];
+							double z1 = input_alts[idx_upper];
+							
+							// 線形補間係数
+							double factor = (target_alt - z0) / (z1 - z0);
+
+							// ★ここが最適化ポイント★
+							// 「波長ごとのループ」の中で「高度探索」をするのではなく、
+							// 「決まった2つの高度層」に対して「全波長を一気に計算」する。
+							
+							const auto& layer0 = loaded_data[idx_lower];
+							const auto& layer1 = loaded_data[idx_upper];
+
+							// ---------------------------------------------------
+							// 補間方法による分岐 (ループの外で判定)
+							// ---------------------------------------------------
+							if (itp_method == physics::VerticalProfileInterpolation::Linear)
+							{
+								// --- 線形補間 (Linear) ---
+								// y = y0 + factor * (y1 - y0)
+								for(size_t k = 0; k < n_spec; ++k)
+								{
+									double wl = layer0[k][1];
+									double nr = layer0[k][2] + factor * (layer1[k][2] - layer0[k][2]);
+									double ni = layer0[k][3] + factor * (layer1[k][3] - layer0[k][3]);
+
+									s.refractive_index[j][k] = {wl, nr, ni};
+								}
+							}
+							else
+							{
+								// --- 対数線形補間 (Exponential / Log-Linear) ---
+								// ln(y) = ln(y0) + factor * (ln(y1) - ln(y0))
+								// y = exp( ... )
+								
+								for(size_t k = 0; k < n_spec; ++k)
+								{
+									double wl = layer0[k][1];
+									double nr, ni;
+
+									// 実部 (Nr) の補間
+									double nr0 = layer0[k][2];
+									double nr1 = layer1[k][2];
+									
+									// 安全策: 値が正でなければ対数が取れないため、線形にフォールバック
+									if (nr0 <= 1.0e-50 || nr1 <= 1.0e-50)
+									{
+										nr = nr0 + factor * (nr1 - nr0);
+									}
+									else
+									{
+										nr = std::exp(std::log(nr0) + factor * (std::log(nr1) - std::log(nr0)));
+									}
+
+									// 虚部 (Ni) の補間
+									double ni0 = layer0[k][3];
+									double ni1 = layer1[k][3];
+
+									if (ni0 <= 1.0e-50 || ni1 <= 1.0e-50)
+									{
+										ni = ni0 + factor * (ni1 - ni0);
+									}
+									else
+									{
+										ni = std::exp(std::log(ni0) + factor * (std::log(ni1) - std::log(ni0)));
+									}
+
+									s.refractive_index[j][k] = {wl, nr, ni};
+								}
+							}
+						}
+					}
+				}
+
+				if(s_input.size_distribution.value() == physics::ParticleSizeDistribution::Delta)
+				{
+					s.particle_size_distribution = {{s_input.delta_r.value() * physics::scaleUnit(s_input.unit_input_radius.value(), "m"), 1.0}};
+					s.weight_particle_size_distribution = {{s_input.delta_r.value() * physics::scaleUnit(s_input.unit_input_radius.value(), "m"), 1.0}};
+				}
+				else if(s_input.size_distribution.value() == physics::ParticleSizeDistribution::Rectangular)
+				{
+					auto node_weight = physics::generateRectangularSizeDistribution(s_input.count_radius.value(), s_input.rect_r_mean.value() * physics::scaleUnit(s_input.unit_input_radius.value(), "m"), s_input.rect_width.value() * physics::scaleUnit(s_input.unit_input_radius.value(), "m"));
+					s.particle_size_distribution = node_weight[0]; // 本当は不要
+					s.weight_particle_size_distribution = node_weight[1];
+				}
+				else if(s_input.size_distribution.value() == physics::ParticleSizeDistribution::Gamma)
+				{
+					auto node_weight = physics::generateGammaSizeDistribution(s_input.count_radius.value(), s_input.gd_a.value() * physics::scaleUnit(s_input.unit_input_radius.value(), "m"), s_input.gd_b.value());
+					s.particle_size_distribution = node_weight[0]; // 本当は不要
+					s.weight_particle_size_distribution = node_weight[1];
+				}
+				else if(s_input.size_distribution.value() == physics::ParticleSizeDistribution::ModifiedGamma)
+				{
+					auto node_weight = physics::generateModifiedGammaSizeDistribution(s_input.count_radius.value(), s_input.mgd_r_c.value() * physics::scaleUnit(s_input.unit_input_radius.value(), "m"), s_input.mgd_alpha.value(), s_input.mgd_gamma.value());
+					s.particle_size_distribution = node_weight[0]; // 本当は不要
+					s.weight_particle_size_distribution = node_weight[1];
+				}
+				else if(s_input.size_distribution.value() == physics::ParticleSizeDistribution::LogNormal)
+				{
+					auto node_weight = physics::generateLogNormalSizeDistribution(s_input.count_radius.value(), s_input.lnd_r_g.value() * physics::scaleUnit(s_input.unit_input_radius.value(), "m"), s_input.lnd_sigma_g.value());
+					s.particle_size_distribution = node_weight[0]; // 本当は不要
+					s.weight_particle_size_distribution = node_weight[1];
+				}
+				else if(s_input.size_distribution.value() == physics::ParticleSizeDistribution::PowerLaw)
+				{
+					auto node_weight = physics::generatePowerLawSizeDistribution(s_input.count_radius.value(), s_input.pl_delta.value(), s_input.pl_r1.value() * physics::scaleUnit(s_input.unit_input_radius.value(), "m"), s_input.pl_r2.value() * physics::scaleUnit(s_input.unit_input_radius.value(), "m"));
+					s.particle_size_distribution = node_weight[0]; // 本当は不要
+					s.weight_particle_size_distribution = node_weight[1];
+				}
+			}
+		}
+
+		if(s.is_hitran == false)
+		{
+			species.push_back(s);
+		}
+		else
+		{
+			double wavenumber_max_calc, wavenumber_min_calc;
+
+			if(spectral.spectral_dimension == physics::SpectralCoordinateDimension::Wavelength)
+			{
+				wavenumber_max_calc = 1.0 / spectral.spectral_grid[0];
+				wavenumber_min_calc = 1.0 / spectral.spectral_grid[spectral.spectral_grid.size() - 1];
+			}
+			else if(spectral.spectral_dimension == physics::SpectralCoordinateDimension::Wavenumber)
+			{
+				wavenumber_max_calc = spectral.spectral_grid[spectral.spectral_grid.size() - 1];
+				wavenumber_min_calc = spectral.spectral_grid[0];
+			}
+
+			double wavenumber_min = std::max(0.0, wavenumber_min_calc - 1000.0 * physics::scaleUnit("cm-1", "m-1"));
+			double wavenumber_max = wavenumber_max_calc + 1000.0 * physics::scaleUnit("cm-1", "m-1"); // 1000.0はハードコード．あまり良くないかも
+
+
+			if(s_input.isotopologue_type.value() == physics::IsotopologueType::All)
+			{
+				auto isos = physics::isos_for_molecule(s_input.molecule_id.value());
+
+				if(!s_input.abundance.empty())
+				{
+					for(int j = 0; j < isos.size(); ++j)
+					{
+						isos[j].abundance = s_input.abundance[j];
+					}
+				}
+				
+				if(!s_input.scalar.empty())
+				{
+					for(int j = 0; j < isos.size(); ++j)
+					{
+						isos[j].abundance *= s_input.scalar[j];
+					}
+				}
+
+				if(s_input.is_normalize.value() == true)
+				{
+					double norm_const = 0.0;
+
+					for(const auto& iso : isos)
+					{
+						norm_const += iso.abundance;
+					}
+					
+					if(norm_const > 0.0)
+					{
+						for(auto& iso : isos)
+						{
+							iso.abundance /= norm_const;
+						}
+					}
+				}
+
+				for(int j = 0; j < isos.size(); ++j)
+				{
+					physics::Species ss = s;
+					ss.isotopologue = isos[j];
+					ss.isotopologue.loadQTable(nc_hitran);
+
+					for(int k = 0; k < ss.vertical_mixing_ratio_profile.size(); ++k)
+					{
+						ss.vertical_mixing_ratio_profile[k] *= isos[j].abundance;
+						ss.vertical_number_density_profile[k] *= isos[j].abundance;
+					}
+
+					ss.lines = physics::loadLines(nc_hitran, ss.isotopologue, wavenumber_min, wavenumber_max, false);
+
+					species.push_back(ss);
+				}
+			}
+			else if(s_input.isotopologue_type.value() == physics::IsotopologueType::Defined)
+			{
+				std::vector<physics::Isotopologue> isos(s_input.local_isotopologue_id.size());
+
+				for(int j = 0; j < isos.size(); ++j)
+				{
+					isos[j] = physics::iso_from_global(physics::global_from_mol_local(s_input.molecule_id.value(), s_input.local_isotopologue_id[j]));
+				}
+
+				if(!s_input.abundance.empty())
+				{
+					for(int j = 0; j < isos.size(); ++j)
+					{
+						isos[j].abundance = s_input.abundance[j];
+					}
+				}
+				
+				if(!s_input.scalar.empty())
+				{
+					for(int j = 0; j < isos.size(); ++j)
+					{
+						isos[j].abundance *= s_input.scalar[j];
+					}
+				}
+
+				if(s_input.is_normalize.value() == true)
+				{
+					double norm_const = 0.0;
+
+					for(const auto& iso : isos)
+					{
+						norm_const += iso.abundance;
+					}
+					
+					if(norm_const > 0.0)
+					{
+						for(auto& iso : isos)
+						{
+							iso.abundance /= norm_const;
+						}
+					}
+				}
+
+				for(int j = 0; j < isos.size(); ++j)
+				{
+					physics::Species ss = s;
+					ss.isotopologue = isos[j];
+					ss.isotopologue.loadQTable(nc_hitran);
+
+					for(int k = 0; k < ss.vertical_mixing_ratio_profile.size(); ++k)
+					{
+						ss.vertical_mixing_ratio_profile[k] *= isos[j].abundance;
+						ss.vertical_number_density_profile[k] *= isos[j].abundance;
+					}
+
+					ss.lines = physics::loadLines(nc_hitran, ss.isotopologue, wavenumber_min, wavenumber_max, false);
+
+					species.push_back(ss);
+				}
+			}
+		}
+	}
+
+	return species;
+}
+
+inline physics::SimulationInformation ModelBuilder::buildSimulation(const physics::Configuration& configuration)
+{
+	physics::SimulationInformation simulation;
+	
+	simulation.directory_name = configuration.simulation.directory_name.value();
+	simulation.result_name = configuration.simulation.result_name.value();
+	simulation.simulation_name = configuration.simulation.simulation_name.value();
+	simulation.n_scattering_angle = configuration.simulation.n_scattering_angle.value();
+	simulation.n_parallel = configuration.simulation.n_parallel.value();
+	// simulation.logfile_name = configuration.simulation.logfile_name.value();
+
+	return simulation;
+}
+
+inline physics::AtmosphereModel ModelBuilder::buildAtmosphereModel(const physics::Configuration& configuration, const physics::SpectralInformation& spectral)
+{
+	physics::AtmosphereModel model;
+
+	// layering
+	if(! configuration.atmosphere.z_edge.empty())
+	{
+		int n_layer = configuration.atmosphere.z_edge.size() - 1;
+		model.altitude_bottom.resize(n_layer);
+		model.altitude_top.resize(n_layer);
+		model.altitude.resize(n_layer);
+
+		for(int i = 0; i < n_layer; ++i)
+		{
+			model.altitude_bottom[i] = configuration.atmosphere.z_edge[i] * physics::scaleUnit(configuration.atmosphere.z_unit.value(), "m");
+			model.altitude_top[i] = configuration.atmosphere.z_edge[i + 1] * physics::scaleUnit(configuration.atmosphere.z_unit.value(), "m");
+			model.altitude[i] = 0.5 * (model.altitude_top[i] + model.altitude_bottom[i]);
+		}
+	}
+	else
+	{
+		int n_layer = configuration.atmosphere.z_center.size();
+		model.altitude_bottom.resize(n_layer);
+		model.altitude_top.resize(n_layer);
+		model.altitude.resize(n_layer);
+
+		for(int i = 0; i < n_layer; ++i)
+		{
+			model.altitude[i] = configuration.atmosphere.z_center[i] * physics::scaleUnit(configuration.atmosphere.z_unit.value(), "m");
+
+			if(i == 0)
+			{
+				model.altitude_bottom[i] = configuration.atmosphere.z_center[0] * physics::scaleUnit(configuration.atmosphere.z_unit.value(), "m");
+				model.altitude_top[i] = 0.5 * (configuration.atmosphere.z_center[0] + configuration.atmosphere.z_center[1]) * physics::scaleUnit(configuration.atmosphere.z_unit.value(), "m");
+			}
+			else if(i == n_layer - 1)
+			{
+				model.altitude_bottom[i] = 0.5 * (configuration.atmosphere.z_center[n_layer - 2] + configuration.atmosphere.z_center[n_layer - 1]) * physics::scaleUnit(configuration.atmosphere.z_unit.value(), "m");
+				model.altitude_top[i] = configuration.atmosphere.z_center[n_layer - 1] * physics::scaleUnit(configuration.atmosphere.z_unit.value(), "m");
+			}
+			else
+			{
+				model.altitude_bottom[i] = 0.5 * (configuration.atmosphere.z_center[i - 1] + configuration.atmosphere.z_center[i]) * physics::scaleUnit(configuration.atmosphere.z_unit.value(), "m");
+				model.altitude_top[i] = 0.5 * (configuration.atmosphere.z_center[i] + configuration.atmosphere.z_center[i + 1]) * physics::scaleUnit(configuration.atmosphere.z_unit.value(), "m");
+			}
+		}
+	}
+	
+	int n_layer = model.altitude.size();
+
+	model.temperature.resize(n_layer);
+	if(configuration.atmosphere.is_same_temperature_layering_atmosphere == false)
+	{
+		if(configuration.atmosphere.vertical_temperature_profile == physics::VerticalTemperatureProfile::VIRA_EQUATOR || configuration.atmosphere.vertical_temperature_profile == physics::VerticalTemperatureProfile::VIRA_45 || configuration.atmosphere.vertical_temperature_profile == physics::VerticalTemperatureProfile::VIRA_60 || configuration.atmosphere.vertical_temperature_profile == physics::VerticalTemperatureProfile::Table)
+		{
+			std::vector<std::vector<double>> profile_data;
+			if(configuration.atmosphere.vertical_temperature_profile == physics::VerticalTemperatureProfile::VIRA_EQUATOR)
+			{
+				profile_data.resize(physics::vira_equator.size());
+				
+				for(int i = 0; i < physics::vira_equator.size(); i ++)
+				{
+					profile_data[i] = {physics::vira_equator[i][0] * physics::scaleUnit("km", "m"), physics::vira_equator[i][1]};
+				}
+			}
+			else if(configuration.atmosphere.vertical_temperature_profile == physics::VerticalTemperatureProfile::VIRA_45)
+			{
+				profile_data.resize(physics::vira_45.size());
+
+				for(int i = 0; i < physics::vira_45.size(); i ++)
+				{
+					profile_data[i] = {physics::vira_45[i][0] * physics::scaleUnit("km", "m"), physics::vira_45[i][1]};
+				}
+			}
+			else if(configuration.atmosphere.vertical_temperature_profile == physics::VerticalTemperatureProfile::VIRA_60)
+			{
+				profile_data.resize(physics::vira_60.size());
+
+				for(int i = 0; i < physics::vira_60.size(); i ++)
+				{
+					profile_data[i] = {physics::vira_60[i][0] * physics::scaleUnit("km", "m"), physics::vira_60[i][1]};
+				}
+			}
+			else if(configuration.atmosphere.vertical_temperature_profile == physics::VerticalTemperatureProfile::Table)
+			{
+				profile_data.resize(configuration.atmosphere.temperature_profile.size());
+
+				for(int i = 0; i < configuration.atmosphere.temperature_profile.size(); i ++)
+				{
+					profile_data[i] = {configuration.atmosphere.temperature_profile[i][0] * physics::scaleUnit(configuration.atmosphere.temperature_unit[0].value(), "m"), configuration.atmosphere.temperature_profile[i][1]};
+				}
+			}
+			
+			for(int i = 0; i < n_layer; ++i)
+			{
+				model.temperature[i] = interpolateVerticalProfile(model.altitude[i], profile_data, configuration.atmosphere.vertical_temperature_interpolation.value());
+			}
+		}
+	}
+	else
+	{
+		for(int i = 0; i < n_layer; i ++)
+		{
+			model.temperature[i] = configuration.atmosphere.temperature_profile[i][0];
+		}
+	}
+	
+	model.pressure.resize(n_layer);
+
+	if(configuration.atmosphere.is_same_pressure_layering_atmosphere == false)
+	{
+		if(configuration.atmosphere.vertical_pressure_profile == physics::VerticalPressureProfile::VIRA_EQUATOR || configuration.atmosphere.vertical_pressure_profile == physics::VerticalPressureProfile::VIRA_45 || configuration.atmosphere.vertical_pressure_profile == physics::VerticalPressureProfile::VIRA_60 || configuration.atmosphere.vertical_pressure_profile == physics::VerticalPressureProfile::Table)
+		{
+			std::vector<std::vector<double>> profile_data;
+			if(configuration.atmosphere.vertical_pressure_profile == physics::VerticalPressureProfile::VIRA_EQUATOR)
+			{
+				profile_data.resize(physics::vira_equator.size());
+				
+				for(int i = 0; i < physics::vira_equator.size(); i ++)
+				{
+					profile_data[i] = {physics::vira_equator[i][0] * physics::scaleUnit("km", "m"), physics::vira_equator[i][2] * physics::scaleUnit("bar", "Pa")};
+				}
+			}
+			else if(configuration.atmosphere.vertical_pressure_profile == physics::VerticalPressureProfile::VIRA_45)
+			{
+				profile_data.resize(physics::vira_45.size());
+
+				for(int i = 0; i < physics::vira_45.size(); i ++)
+				{
+					profile_data[i] = {physics::vira_45[i][0] * physics::scaleUnit("km", "m"), physics::vira_45[i][2] * physics::scaleUnit("bar", "Pa")};
+				}
+			}
+			else if(configuration.atmosphere.vertical_pressure_profile == physics::VerticalPressureProfile::VIRA_60)
+			{
+				profile_data.resize(physics::vira_60.size());
+
+				for(int i = 0; i < physics::vira_60.size(); i ++)
+				{
+					profile_data[i] = {physics::vira_60[i][0] * physics::scaleUnit("km", "m"), physics::vira_60[i][2] * physics::scaleUnit("bar", "Pa")};
+				}
+			}
+			else if(configuration.atmosphere.vertical_pressure_profile == physics::VerticalPressureProfile::Table)
+			{
+				profile_data.resize(configuration.atmosphere.pressure_profile.size());
+
+				for(int i = 0; i < configuration.atmosphere.pressure_profile.size(); i ++)
+				{
+					profile_data[i] = {configuration.atmosphere.pressure_profile[i][0] * physics::scaleUnit(configuration.atmosphere.pressure_unit[0].value(), "m"), configuration.atmosphere.pressure_profile[i][1] * physics::scaleUnit(configuration.atmosphere.pressure_unit[1].value(), "Pa")};
+				}
+			}
+			
+			for(int i = 0; i < n_layer; ++i)
+			{
+				model.pressure[i] = interpolateVerticalProfile(model.altitude[i], profile_data, configuration.atmosphere.vertical_pressure_interpolation.value());
+			}
+		}
+		else if(configuration.atmosphere.vertical_pressure_profile == physics::VerticalPressureProfile::External)
+		{
+			// configuration.atmosphere.output_log << "CURRENTRY EXTERNAL INPUT IS NOT SUPPORTED" << std::endl;
+		}
+		else if(configuration.atmosphere.vertical_pressure_profile == physics::VerticalPressureProfile::Hydrostatic)
+		{
+			// configuration.atmosphere.output_log << "CURRENTRY HYDROSTATIC IS NOT SUPPORTED" << std::endl;
+		}
+	}
+	else
+	{
+		for(int i = 0; i < n_layer; i ++)
+		{
+			model.pressure[i] = configuration.atmosphere.pressure_profile[i][0] * physics::scaleUnit(configuration.atmosphere.pressure_unit[1].value(), "Pa");
+		}
+	}
+
+	model.number_density.resize(n_layer);
+
+	//Ideal Gas Law PV=nRT n(mol)/V(m^3) = P(N/m^2)/(R(N.m/K/mol)*T(K)) n(molecules/m^3)=NA*P*/(R*T)
+	if(configuration.atmosphere.vertical_number_density_profile == physics::VerticalNumberDensityProfile::IdealGas)
+	{
+		for(int i = 0; i < n_layer; i ++)
+		{
+			model.number_density[i] = model.pressure[i] * physics::AVOGADRO_CONSTANT / (physics::MOLAR_GAS_CONSTANT * model.temperature[i]);
+		}
+	}
+	else
+	{
+		if(configuration.atmosphere.is_same_number_density_layering_atmosphere == false)
+		{
+			if(configuration.atmosphere.vertical_number_density_profile == physics::VerticalNumberDensityProfile::VIRA_EQUATOR || configuration.atmosphere.vertical_number_density_profile == physics::VerticalNumberDensityProfile::VIRA_45 || configuration.atmosphere.vertical_number_density_profile == physics::VerticalNumberDensityProfile::VIRA_60 || configuration.atmosphere.vertical_number_density_profile == physics::VerticalNumberDensityProfile::Table)
+			{
+				std::vector<std::vector<double>> profile_data;
+				if(configuration.atmosphere.vertical_number_density_profile == physics::VerticalNumberDensityProfile::VIRA_EQUATOR)
+				{
+					profile_data.resize(physics::vira_equator.size());
+					
+					for(int i = 0; i < physics::vira_equator.size(); i ++)
+					{
+						profile_data[i] = {physics::vira_equator[i][0] * physics::scaleUnit("km", "m"), physics::vira_equator[i][3] * physics::scaleUnit("m-3", "m-3")};
+					}
+				}
+				else if(configuration.atmosphere.vertical_number_density_profile == physics::VerticalNumberDensityProfile::VIRA_45)
+				{
+					profile_data.resize(physics::vira_45.size());
+
+					for(int i = 0; i < physics::vira_45.size(); i ++)
+					{
+						profile_data[i] = {physics::vira_45[i][0] * physics::scaleUnit("km", "m"), physics::vira_45[i][3] * physics::scaleUnit("m-3", "m-3")};
+					}
+				}
+				else if(configuration.atmosphere.vertical_number_density_profile == physics::VerticalNumberDensityProfile::VIRA_60)
+				{
+					profile_data.resize(physics::vira_60.size());
+
+					for(int i = 0; i < physics::vira_60.size(); i ++)
+					{
+						profile_data[i] = {physics::vira_60[i][0] * physics::scaleUnit("km", "m"), physics::vira_60[i][3] * physics::scaleUnit("m-3", "m-3")};
+					}
+				}
+				else if(configuration.atmosphere.vertical_number_density_profile == physics::VerticalNumberDensityProfile::Table)
+				{
+					profile_data.resize(configuration.atmosphere.number_density_profile.size());
+
+					for(int i = 0; i < configuration.atmosphere.number_density_profile.size(); i ++)
+					{
+						if(configuration.atmosphere.unit_dim_number_density.value() == physics::UnitDim::NumberDensity)
+						{
+							profile_data[i] = {configuration.atmosphere.number_density_profile[i][0] * physics::scaleUnit(configuration.atmosphere.number_density_unit[0].value(), "m"), configuration.atmosphere.number_density_profile[i][1] * physics::scaleUnit(configuration.atmosphere.number_density_unit[1].value(), "m-3")};
+						}
+						else if(configuration.atmosphere.unit_dim_number_density.value() == physics::UnitDim::ColumnNumberDensity)
+						{
+							profile_data[i] = {configuration.atmosphere.number_density_profile[i][0] * physics::scaleUnit(configuration.atmosphere.number_density_unit[0].value(), "m"), configuration.atmosphere.number_density_profile[i][1] * physics::scaleUnit(configuration.atmosphere.number_density_unit[1].value(), "m-2")};
+						}
+					}
+				}
+				
+				for(int i = 0; i < n_layer; ++i)
+				{
+					if(configuration.atmosphere.unit_dim_number_density.value() == physics::UnitDim::NumberDensity)
+					{
+						model.number_density[i] = interpolateVerticalProfile(model.altitude[i], profile_data, configuration.atmosphere.vertical_number_density_interpolation.value());
+					}
+					else if(configuration.atmosphere.unit_dim_number_density.value() == physics::UnitDim::ColumnNumberDensity)
+					{
+						model.number_density[i] = interpolateVerticalProfile(model.altitude[i], profile_data, configuration.atmosphere.vertical_number_density_interpolation.value()) / (model.altitude_top[i] - model.altitude_bottom[i]);
+					}
+				}
+			}
+			else if(configuration.atmosphere.vertical_number_density_profile == physics::VerticalNumberDensityProfile::External)
+			{
+				// configuration.atmosphere.output_log << "CURRENTRY EXTERNAL INPUT IS NOT SUPPORTED" << std::endl;
+			}
+		}
+		else
+		{
+			for(int i = 0; i < n_layer; i ++)
+			{
+				if(configuration.atmosphere.unit_dim_number_density.value() == physics::UnitDim::NumberDensity)
+				{
+					model.number_density[i] = configuration.atmosphere.number_density_profile[i][0] * physics::scaleUnit(configuration.atmosphere.number_density_unit[1].value(), "m-3");
+				}
+				else if(configuration.atmosphere.unit_dim_number_density.value() == physics::UnitDim::ColumnNumberDensity)
+				{
+					model.number_density[i] = configuration.atmosphere.number_density_profile[i][0] * physics::scaleUnit(configuration.atmosphere.number_density_unit[1].value(), "m-2") / (model.altitude_top[i] - model.altitude_bottom[i]);
+				}
+			}
+		}
+	}
+
+	model.enable_atmospheric_emission = configuration.simulation.enable_atmospheric_emission.value();
+
+	// Surface
+	model.surface_type = configuration.surface.type.value();
+	if(model.surface_type != physics::SurfaceType::NoSurface)
+	{
+		model.surface_albedo = configuration.surface.albedo.value();
+		model.surface_temperature = configuration.surface.temperature.value();
+	}
+
+	model.is_hitran = false;
+
+	for(int i = 0; i < configuration.atmosphere.species_configuration.size(); ++i)
+	{
+		if(configuration.atmosphere.species_configuration[i].absorption_cross_section_type.has_value())
+		{
+			if(configuration.atmosphere.species_configuration[i].absorption_cross_section_type == physics::CrossSectionType::HITRAN)
+			{
+				model.is_hitran = true;
+				break;
+			}
+		}
+	}
+
+	model.species = buildSpecies_(configuration, model, spectral);
+
+	if(model.is_hitran)
+	{
+		std::vector<std::string> dil_species = {"AIR", "CO2", "H2", "HE", "H2O"};
+		std::vector<double> dil_ratio(5, 0.0);
+
+		for(int i = 0; i < configuration.atmosphere.diluent_species.size(); ++i)
+		{
+			std::string dil_sp = utils::toUpper(configuration.atmosphere.diluent_species[i]);
+			
+			for(int j = 0; j < dil_species.size(); ++j)
+			{
+				if(dil_sp == dil_species[j])
+				{
+					dil_ratio[j] = configuration.atmosphere.diluent_ratio[i];
+					break;
+				}
+			}
+			
+			model.diluent.air = dil_ratio[0];
+			model.diluent.CO2 = dil_ratio[1];
+			model.diluent.H2 = dil_ratio[2];
+			model.diluent.He = dil_ratio[3];
+			model.diluent.H2O = dil_ratio[4];
+		}
+	}
+
+	return model;
+}
+
+inline core::Geometry ModelBuilder::buildGeometry(const physics::Configuration& configuration)
+{
+	core::Geometry geometry;
+	
+	geometry.Ntheta = configuration.geometry.n_theta.value();
+	// geometry.Nphi = configuration.n_phi;
+	// geometry.M = configuration.n_mode;
+
+	if(configuration.geometry.grid_type == core::GridType::Regular)
+	{
+		if(geometry.Ntheta % 2 == 0)
+		{
+			geometry.Ntheta ++;
+		}
+	}
+
+	if(configuration.geometry.n_mode.has_value() && !configuration.geometry.n_phi.has_value())
+	{
+		geometry.M = configuration.geometry.n_mode.value();
+		geometry.Nphi = geometry.M * 2 + 3;
+	}
+	else if(configuration.geometry.n_phi.has_value() && !configuration.geometry.n_mode.has_value())
+	{
+		geometry.Nphi = configuration.geometry.n_phi.value();
+
+		if(geometry.Nphi % 2 == 0)
+		{
+			geometry.Nphi ++;
+		}
+		
+		geometry.M = (geometry.Nphi - 3) / 2;
+	}
+	else if(!configuration.geometry.n_phi.has_value() && !configuration.geometry.n_mode.has_value())
+	{
+		geometry.Nphi = geometry.Ntheta * 4 + 1;
+		geometry.M = (geometry.Nphi - 3) / 2;
+	}
+
+	geometry.phi = Eigen::VectorXd::Zero(geometry.Nphi);
+	geometry.d_phi = 2.0 * std::numbers::pi / double(geometry.Nphi);
+
+	for(int i = 0; i < geometry.Nphi; i ++)
+	{
+		geometry.phi(i) = double(i) * geometry.d_phi;
+	}
+
+	geometry.theta_uh = Eigen::VectorXd::Zero(geometry.Ntheta);
+	geometry.theta_lh = Eigen::VectorXd::Zero(geometry.Ntheta);
+	geometry.theta_all = Eigen::VectorXd::Zero(geometry.Ntheta * 2);
+	
+	geometry.weight = Eigen::VectorXd::Zero(geometry.Ntheta);
+	geometry.mu = Eigen::VectorXd::Zero(geometry.Ntheta);
+	geometry.WMU = Eigen::MatrixXd::Zero(geometry.Ntheta, geometry.Ntheta);
+
+	if(configuration.geometry.grid_type == core::GridType::Regular)
+	{
+		double eps = std::numbers::pi / 2.0 / double(geometry.Ntheta - 1) * 1.0E-3;
+		double dtheta = (std::numbers::pi / 2.0 - eps) / double(geometry.Ntheta - 1);
+
+		// #pragma omp parallel for
+		for(int i = 0; i < geometry.Ntheta; i ++)
+		{	
+			geometry.theta_uh(i) = 0.0 + dtheta * double(i);
+			geometry.theta_lh(i) = std::numbers::pi - dtheta * double(i);
+			geometry.mu(i) = std::abs(std::cos(geometry.theta_uh(i)));
+
+			geometry.theta_all(i) = geometry.theta_uh(i);
+			geometry.theta_all(geometry.Ntheta * 2 - 1 - i) = geometry.theta_lh(i);
+		}
+
+		// #pragma omp parallel for
+		for(int i = 0; i < geometry.Ntheta; i ++)
+		{
+			if(i <= geometry.Ntheta - 3)
+			{
+				if(i == 0 || i == geometry.Ntheta - 3)
+				{
+					geometry.weight(i) = 1.0 / 3.0 * dtheta * std::sin(geometry.theta_uh(i));
+				}
+				else if(i % 2 == 1)
+				{
+					geometry.weight(i) = 4.0 / 3.0 * dtheta * std::sin(geometry.theta_uh(i));
+				}
+				else
+				{
+					geometry.weight(i) = 2.0 / 3.0 * dtheta * std::sin(geometry.theta_uh(i));
+				}
+			}
+
+			if(i == geometry.Ntheta - 3)
+			{
+				geometry.weight(i) += ((1.0 / (6.0 * dtheta * dtheta)) * std::pow(2.0 * dtheta + eps, 3) - (3.0 / (4.0 * dtheta)) * std::pow(2.0 * dtheta + eps, 2) + (2.0 * dtheta + eps)) * std::sin(geometry.theta_uh(i));
+			}
+			else if(i == geometry.Ntheta - 2)
+			{
+				geometry.weight(i) = ((- 1.0 / (3.0 * dtheta * dtheta)) * std::pow(2.0 * dtheta + eps, 3) + (1.0 / dtheta) * std::pow(2.0 * dtheta + eps, 2)) * std::sin(geometry.theta_uh(i));
+			}
+			else if(i == geometry.Ntheta - 1)
+			{
+				geometry.weight(i) = ((1.0 / (6.0 * dtheta * dtheta)) * std::pow(2.0 * dtheta + eps, 3) - (1.0 / (4.0 * dtheta)) * std::pow(2.0 * dtheta + eps, 2)) * std::sin(geometry.theta_uh(i));
+			}
+		}
+	}
+	else if(configuration.geometry.grid_type == core::GridType::GaussRadau)
+	{
+		auto node_weight = utils::computeGaussRadauQuadratureNodeWeight(geometry.Ntheta);
+
+		for(int i = 0; i < node_weight.size(); i ++)
+		{
+			geometry.theta_uh(i) = std::acos(node_weight[node_weight.size() - 1 - i][0]);
+			geometry.theta_lh(i) = std::numbers::pi - std::acos(node_weight[node_weight.size() - 1 - i][0]);
+
+			geometry.theta_all(i) = geometry.theta_uh(i);
+			geometry.theta_all(geometry.Ntheta * 2 - 1 - i) = geometry.theta_lh(i);
+
+			geometry.mu(i) = node_weight[node_weight.size() - 1 - i][0];
+			geometry.weight(i) = node_weight[node_weight.size() - 1 - i][1];
+		}
+	}
+
+	// #pragma omp parallel for
+	for(int i = 0; i < geometry.Ntheta; i ++)
+	{
+		geometry.WMU(i, i) = geometry.weight(i) * geometry.mu(i);
+	}
+
+	return geometry;
+}
+
+inline physics::SpectralInformation ModelBuilder::buildSpectral(const physics::Configuration& configuration)
+{
+	physics::SpectralInformation spectral;
+
+	// spectral.n_parallel = configuration.simulation.n_parallel.value();
+	
+	spectral.spectral_dimension = configuration.spectral_coordinate.spectral_coordinate_dimension.value();
+
+	//monochrome, spectrum, bandpass
+	if(configuration.spectral_coordinate.spectral_coordinate_type.value() == physics::SpectralCoordinateType::Monochrome)
+	{
+		spectral.spectral_coordinate_type = physics::SpectralCoordinateType::Monochrome;
+		
+		spectral.spectral_grid = {configuration.spectral_coordinate.mono.value() * physics::getUnitInfo(configuration.spectral_coordinate.unit.value()).to_si};
+	}
+	else if(configuration.spectral_coordinate.spectral_coordinate_type.value() == physics::SpectralCoordinateType::Spectrum)
+	{
+		spectral.spectral_coordinate_type = physics::SpectralCoordinateType::Spectrum;
+
+		if(configuration.instrument.convolution_kernel_type.value() == physics::InstrumentFunctionType::Delta)
+		{
+			spectral.convolution_kernel = {1.0};
+
+			if(configuration.spectral_coordinate.n_spectral.has_value())
+			{
+				double scale = physics::getUnitInfo(configuration.spectral_coordinate.unit.value()).to_si;
+
+				double min = configuration.spectral_coordinate.min.value() * scale;
+				double max = configuration.spectral_coordinate.max.value() * scale;
+				int n_spec = configuration.spectral_coordinate.n_spectral.value();
+				double d_spec = (max - min) / static_cast<double>(n_spec - 1);
+				spectral.spectral_grid.resize(n_spec);
+				
+				for(int i = 0; i < n_spec; ++i)
+				{
+					spectral.spectral_grid[i] = min + d_spec * static_cast<double>(i);
+				}
+			}
+			else
+			{
+				double scale = physics::getUnitInfo(configuration.spectral_coordinate.unit.value()).to_si;
+
+				double min = configuration.spectral_coordinate.min.value() * scale;
+				double max = configuration.spectral_coordinate.max.value() * scale;
+
+				double d_spec = configuration.spectral_coordinate.increment.value() * scale;
+				int n_spec = static_cast<int>((max - min) / d_spec);
+				spectral.spectral_grid.resize(n_spec);
+
+				for(int i = 0; i < n_spec; ++i)
+				{
+					spectral.spectral_grid[i] = min + d_spec * static_cast<double>(i);
+				}
+			}
+		}
+		else if(configuration.instrument.convolution_kernel_type.value() == physics::InstrumentFunctionType::Rectangle)
+		{
+			// パディングが必要
+			double scale = physics::getUnitInfo(configuration.spectral_coordinate.unit.value()).to_si;
+			double min = configuration.spectral_coordinate.min.value() * scale;
+			double max = configuration.spectral_coordinate.max.value() * scale;
+			double width = configuration.instrument.kernel_width.value() * scale;
+
+			int osc = configuration.instrument.over_sampling_count.value() % 2 == 0 ? configuration.instrument.over_sampling_count.value() + 1 : configuration.instrument.over_sampling_count.value();
+			// ここでカーネルとspectralグリッドを生成
+			double d_spec = width / static_cast<double>(osc - 1);
+			int n_spec = static_cast<int>((max - min) / d_spec);
+			spectral.spectral_grid.resize(n_spec + (osc - 1));
+			
+
+			for(int i = 0; i < n_spec + (osc - 1); ++i)
+			{
+				spectral.spectral_grid[i] = min + static_cast<double>(i - osc / 2) * d_spec;
+			}
+
+			spectral.convolution_kernel = physics::generateRectangularKernel(osc);
+		}
+		else if(configuration.instrument.convolution_kernel_type.value() == physics::InstrumentFunctionType::Gauss)
+		{
+			double scale = physics::getUnitInfo(configuration.spectral_coordinate.unit.value()).to_si;
+			double min = configuration.spectral_coordinate.min.value() * scale;
+			double max = configuration.spectral_coordinate.max.value() * scale;
+			double sigma = configuration.instrument.kernel_sigma.value() * scale;
+			double cut_off_sigma = configuration.instrument.kernel_cut_off_sigma.value();
+			int osc = configuration.instrument.over_sampling_count.value() % 2 == 0 ? configuration.instrument.over_sampling_count.value() + 1 : configuration.instrument.over_sampling_count.value();
+			double d_spec = 2.0 * cut_off_sigma * sigma / static_cast<double>(osc - 1);
+			int n_spec = static_cast<int>((max - min) / d_spec);
+			spectral.spectral_grid.resize(n_spec + (osc - 1));
+			
+			for(int i = 0; i < n_spec + (osc - 1); ++i)
+			{
+				spectral.spectral_grid[i] = min + static_cast<double>(i - osc / 2) * d_spec;
+			}
+
+			spectral.convolution_kernel = physics::generateGaussianKernel(sigma, osc, cut_off_sigma);
+		}
+	}
+	else if(configuration.spectral_coordinate.spectral_coordinate_type.value() == physics::SpectralCoordinateType::Bandpass)
+	{
+		spectral.spectral_coordinate_type = physics::SpectralCoordinateType::Bandpass;
+
+		if(configuration.instrument.filter_function_type.value() == physics::InstrumentFunctionType::Delta)
+		{
+			double scale = physics::getUnitInfo(configuration.spectral_coordinate.unit.value()).to_si;
+			double center = configuration.instrument.filter_center.value() * scale;
+			spectral.spectral_grid = {center};
+			spectral.filter_function = {1.0};
+			spectral.filter_weight = {1.0};
+
+		}
+		else if(configuration.instrument.filter_function_type.value() == physics::InstrumentFunctionType::Rectangle)
+		{
+			double scale = physics::getUnitInfo(configuration.spectral_coordinate.unit.value()).to_si;
+			double center = configuration.instrument.filter_center.value() * scale;
+			double width = configuration.instrument.filter_width.value() * scale;
+			
+			auto grid = physics::generateSpectralGridRectangular(configuration.instrument.sampling_count.value(), center, width);
+
+			spectral.spectral_grid = grid[0];
+			spectral.filter_function = grid[1];
+			spectral.filter_weight = grid[2];
+		}
+		else if(configuration.instrument.filter_function_type.value() == physics::InstrumentFunctionType::Gauss)
+		{
+			double scale = physics::getUnitInfo(configuration.spectral_coordinate.unit.value()).to_si;
+			double center = configuration.instrument.filter_center.value() * scale;
+			double sigma = configuration.instrument.filter_sigma.value() * scale;
+			
+			auto grid = physics::generateSpectralGridGaussian(configuration.instrument.sampling_count.value(), center, sigma);
+
+			spectral.spectral_grid = grid[0];
+			spectral.filter_function = grid[1];
+			spectral.filter_weight = grid[2];
+		}
+		else if(configuration.instrument.filter_function_type.value() == physics::InstrumentFunctionType::External)
+		{
+			if(spectral.spectral_dimension == physics::SpectralCoordinateDimension::Wavelength)
+			{
+				auto loaded_data = io::loadSpectralFile(configuration.instrument.filename_filter_function.value(), configuration.instrument.varname_spectral.value(), configuration.instrument.varname_transmittance.value(), "m", "dimensionless");
+				auto grid = physics::generateSpectralGridBandpass(configuration.instrument.sampling_count.value(), loaded_data, configuration.instrument.filter_cut_off.value());
+				spectral.spectral_grid = grid[0];
+				spectral.filter_function = grid[1];
+				spectral.filter_weight = grid[2];
+			}
+			else if(spectral.spectral_dimension == physics::SpectralCoordinateDimension::Wavenumber)
+			{
+				auto loaded_data = io::loadSpectralFile(configuration.instrument.filename_filter_function.value(), configuration.instrument.varname_spectral.value(), configuration.instrument.varname_transmittance.value(), "m-1", "dimensionless");
+				auto grid = physics::generateSpectralGridBandpass(configuration.instrument.sampling_count.value(), loaded_data, configuration.instrument.filter_cut_off.value());
+				spectral.spectral_grid = grid[0];
+				spectral.filter_function = grid[1];
+				spectral.filter_weight = grid[2];
+			}
+		}
+	}
+	
+	return spectral;
+}
+
+inline physics::DeltaApproximation ModelBuilder::buildDeltaApproximation(const physics::Configuration& configuration)
+{
+	physics::DeltaApproximation delta_approximation;
+
+	delta_approximation.delta_approximation_type = configuration.delta_m.delta_approximation_type.value();
+	// delta_approximation.icss_type = configuration.delta_m.icss_type.value();
+	// delta_approximation.n_icss_sample = configuration.delta_m.n_icss_sample.value();
+	if(delta_approximation.delta_approximation_type == physics::DeltaApproximationType::Cumulative)
+	{
+		delta_approximation.f_target = configuration.delta_m.f_target.value();
+	}
+	else if(delta_approximation.delta_approximation_type == physics::DeltaApproximationType::FWHM)
+	{
+		delta_approximation.fwhm_ratio = configuration.delta_m.fwhm_ratio.value();
+	}
+	
+
+	return delta_approximation;
+}
+
+}

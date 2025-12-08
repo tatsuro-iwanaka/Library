@@ -3,3 +3,6 @@
 
 # Editor settings
 .vscode/
+adjoint_adding_doubling.code-workspace
+
+.gitignore

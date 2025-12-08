@@ -1,0 +1,339 @@
+#pragma once
+
+// #include <complex>
+#include <filesystem>
+#include <fstream>
+#include <iomanip>
+#include <cmath>
+#include <vector>
+#include <string>
+#include <algorithm>
+#include <stdexcept>
+// #include <limits>
+// #include<omp.h>
+#include "../Core"
+#include "Types"
+#include "Constants"
+#include "HITRAN"
+#include "../utils/Math"
+#include "../io/Logger"
+
+// #include<Eigen/Dense>
+#include<netcdf>
+
+namespace aad::physics
+{
+
+inline void ArrheniusCrossSectionModel::loadVectors(const std::vector<double>& spectral, const std::vector<double>& temperature, const std::vector<std::vector<double>>& cross_section)
+{
+	spectral_ = spectral;
+	size_t num_specs = spectral_.size();
+	size_t num_temps = temperature.size();
+
+	slope_.resize(num_specs);
+	intercept_.resize(num_specs);
+	valid_flag_.resize(num_specs, false);
+
+	// 各波長ごとに回帰を実行
+	for (size_t i = 0; i < num_specs; ++i)
+	{
+		// 1. 回帰用のデータを収集 (x=1/T, y=ln(sigma))
+		double sum_x = 0.0, sum_y = 0.0, sum_xy = 0.0, sum_xx = 0.0;
+		int n = 0;
+
+		for (size_t j = 0; j < num_temps; ++j)
+		{
+			double val = cross_section[i][j];
+			
+			// 物理的に意味のある値のみ使用 (0以下は除外)
+			if (val > 0.0)
+			{ 
+				double x = 1.0 / temperature[j];
+				double y = std::log(val);
+				
+				sum_x += x;
+				sum_y += y;
+				sum_xy += x * y;
+				sum_xx += x * x;
+				n++;
+			}
+		}
+
+		// 2. 最小二乗法で係数を決定
+		if (n >= 2)
+		{ // 2点以上あれば線を引ける
+			double denominator = static_cast<double>(n) * sum_xx - sum_x * sum_x;
+
+			if (std::abs(denominator) > 0.0)
+			{
+				slope_[i] = (static_cast<double>(n) * sum_xy - sum_x * sum_y) / denominator;
+				intercept_[i] = (sum_xx * sum_y - sum_xy * sum_x) / denominator;
+				valid_flag_[i] = true;
+			}
+		} 
+		else if(n == 1)
+		{
+			// 有効データが少なすぎる場合は、0として扱う
+			slope_[i] = 0.0;
+			intercept_[i] = sum_y; // exp(-9999) -> 0
+			valid_flag_[i] = true;
+		}
+		else
+		{
+			// 有効データが少なすぎる場合は、0として扱う
+			slope_[i] = 0.0;
+			intercept_[i] = -1.0E300; // exp(-9999) -> 0
+			valid_flag_[i] = false;
+		}
+	}
+}
+
+inline void ArrheniusCrossSectionModel::loadNetCDF(const std::string& filename, const std::string& var_name_spectral, const std::string& var_name_temperature, const std::string& var_name_cross_section, const std::string& unit_target_spectral, const std::string& unit_target_temperature, const std::string& unit_target_cross_section)
+{
+	try
+	{
+		netCDF::NcFile dataFile(filename, netCDF::NcFile::read);
+
+		auto getVarSafe = [&](std::string name) -> netCDF::NcVar
+		{
+			netCDF::NcVar var = dataFile.getVar(name);
+			if(var.isNull())
+			{
+				io::global().fatal("ArrheniusCrossSectionModel::loadNetCDF") << "NetCDF Variable '" + name + "' not found in " + filename;
+				throw std::runtime_error("NetCDF Variable '" + name + "' not found in " + filename);
+			}
+			return var;
+		};
+
+		netCDF::NcVar v_spec = getVarSafe(var_name_spectral);
+		netCDF::NcVar v_temp = getVarSafe(var_name_temperature);
+		netCDF::NcVar v_cross_section = getVarSafe(var_name_cross_section);
+
+		size_t num_spec = v_spec.getDim(0).getSize();
+		size_t num_temp = v_temp.getDim(0).getSize();
+
+		// 単位変換
+		std::string source_unit_spec;
+		try
+		{
+			netCDF::NcVarAtt att = v_spec.getAtt("units");
+			if(!att.isNull()) att.getValues(source_unit_spec);
+		}
+		catch(...)
+		{
+			io::global().info("ArrheniusCrossSectionModel::loadNetCDF") << "Unit missing for " << var_name_spectral << ". Assuming " << unit_target_spectral << ".";
+
+			source_unit_spec = unit_target_spectral;
+		}
+
+		std::string source_unit_temperature;
+		try
+		{
+			netCDF::NcVarAtt att = v_temp.getAtt("units");
+			if(!att.isNull()) att.getValues(source_unit_temperature);
+		}
+		catch(...)
+		{
+			io::global().info("ArrheniusCrossSectionModel::loadNetCDF") << "Unit missing for " << var_name_temperature << ". Assuming " << unit_target_temperature << ".";
+			source_unit_temperature = unit_target_temperature;
+		}
+
+		std::string source_unit_cross_section;
+		try
+		{
+			netCDF::NcVarAtt att = v_cross_section.getAtt("units");
+			if(!att.isNull()) att.getValues(source_unit_cross_section);
+		}
+		catch(...)
+		{
+			io::global().info("ArrheniusCrossSectionModel::loadNetCDF") << "Unit missing for " << var_name_cross_section << ". Assuming " << unit_target_cross_section << ".";
+			source_unit_cross_section = unit_target_cross_section;
+		}
+
+		// double scale_spec = scaleUnit(source_unit_spec, unit_target_spectral);
+
+		// データ読み込み用バッファ（フラットな1次元配列として読む）
+		std::vector<double> buf_spec(num_spec);
+		std::vector<double> buf_temperature(num_temp);
+		std::vector<double> buf_cross_section(num_spec * num_temp);
+
+		v_spec.getVar(buf_spec.data());
+		v_temp.getVar(buf_temperature.data());
+		v_cross_section.getVar(buf_cross_section.data());
+
+		// --- 単位変換係数の計算 ---
+		bool is_spectral_dimension_mismatch;
+		double scale_spec;
+
+		// UnitInfoの取得ロジック（仮定）
+		auto info_target = getUnitInfo(unit_target_spectral);
+		auto info_source = getUnitInfo(source_unit_spec);
+
+		if(info_target.dim != info_source.dim)
+		{
+			// 次元不一致（波長⇔波数など）の場合は逆数変換
+			is_spectral_dimension_mismatch = true;
+			scale_spec = 1.0 / (info_source.to_si * info_target.to_si);
+		}
+		else
+		{
+			is_spectral_dimension_mismatch = false;
+			scale_spec = scaleUnit(source_unit_spec, unit_target_spectral);
+		}
+
+		double scale_temp = scaleUnit(source_unit_temperature, unit_target_temperature);
+		double scale_cross_section = scaleUnit(source_unit_cross_section, unit_target_cross_section);
+
+		// 最終的なコンテナ
+		std::vector<double> spectral(num_spec);
+		std::vector<double> temperature(num_temp);
+		std::vector<std::vector<double>> cross_section(num_spec, std::vector<double>(num_temp));
+
+		for(int i = 0; i < num_spec; ++i)
+		{
+			if(is_spectral_dimension_mismatch)
+			{
+				// 例: cm-1 = 1 / (nm * conversion_factor)
+				spectral[i] = scale_spec / buf_spec[i]; 
+			}
+			else
+			{
+				spectral[i] = buf_spec[i] * scale_spec;
+			}
+
+			for(int j = 0; j < num_temp; ++j)
+			{
+				cross_section[i][j] = buf_cross_section[i * num_temp + j] * scale_cross_section;
+			}
+		}
+		for(int j = 0; j < num_temp; ++j)
+		{
+			temperature[j] = buf_temperature[j] * scale_temp;
+		}
+
+		sort(spectral, temperature, cross_section);
+
+		spectral_ = spectral;
+		
+		size_t num_specs = spectral_.size();
+		size_t num_temps = temperature.size();
+
+		slope_.resize(num_specs);
+		intercept_.resize(num_specs);
+		valid_flag_.resize(num_specs, false);
+
+		// 各波長ごとに回帰を実行
+		for (size_t i = 0; i < num_specs; ++i)
+		{
+			// 1. 回帰用のデータを収集 (x=1/T, y=ln(sigma))
+			double sum_x = 0.0, sum_y = 0.0, sum_xy = 0.0, sum_xx = 0.0;
+			int n = 0;
+
+			for (size_t j = 0; j < num_temps; ++j)
+			{
+				double val = cross_section[i][j];
+				
+				// 物理的に意味のある値のみ使用 (0以下は除外)
+				if (val > 0.0)
+				{ 
+					double x = 1.0 / temperature[j];
+					double y = std::log(val);
+					
+					sum_x += x;
+					sum_y += y;
+					sum_xy += x * y;
+					sum_xx += x * x;
+					n++;
+				}
+			}
+
+			// 2. 最小二乗法で係数を決定
+			if (n >= 2)
+			{ // 2点以上あれば線を引ける
+				double denominator = static_cast<double>(n) * sum_xx - sum_x * sum_x;
+
+				if (std::abs(denominator) > 0.0)
+				{
+					slope_[i] = (static_cast<double>(n) * sum_xy - sum_x * sum_y) / denominator;
+					intercept_[i] = (sum_xx * sum_y - sum_xy * sum_x) / denominator;
+					valid_flag_[i] = true;
+				}
+			} 
+			else if(n == 1)
+			{
+				// 有効データが少なすぎる場合は、0として扱う
+				slope_[i] = 0.0;
+				intercept_[i] = sum_y; // exp(-9999) -> 0
+				valid_flag_[i] = true;
+			}
+			else
+			{
+				// 有効データが少なすぎる場合は、0として扱う
+				slope_[i] = 0.0;
+				intercept_[i] = -1.0E300; // exp(-9999) -> 0
+				valid_flag_[i] = false;
+			}
+		}
+	}
+	catch(const netCDF::exceptions::NcException& e)
+	{
+		io::global().fatal("ArrheniusCrossSectionModel::loadNetCDF") << "NetCDF Error in " + filename + ": " + std::string(e.what());
+		throw std::runtime_error("NetCDF Error in " + filename + ": " + std::string(e.what()));
+	}
+}
+
+inline double ArrheniusCrossSectionModel::interpolateTemperature_(std::int64_t idx, double temperature) const
+{
+	if (!valid_flag_[idx])
+	{
+		return 0.0;
+	}
+
+    return std::exp(intercept_[idx] + slope_[idx] / temperature);
+}
+
+inline double ArrheniusCrossSectionModel::cross_section(double spectral, double temperature) const
+{
+	// 1. 範囲外チェック (外挿はせず0を返す、または端の値を返す方針)
+	if (spectral_.empty())
+	{
+		return 0.0;
+	}
+	if (spectral < spectral_.front() || spectral > spectral_.back())
+	{
+		return 0.0; // 今回は範囲外は0とする
+	}
+
+	// 2. 二分探索で位置を特定 (lower_bound: 指定値以上の最初の要素へのイテレータ)
+	auto it = std::lower_bound(spectral_.begin(), spectral_.end(), spectral);
+
+	// グリッドと完全に一致した場合
+	if (it != spectral_.end() && *it == spectral)
+	{
+		std::int64_t idx = std::distance(spectral_.begin(), it);
+		return interpolateTemperature_(idx, temperature);
+	}
+
+	// 3. 両隣のインデックスを取得
+	auto it_next = it;
+	auto it_prev = it - 1;
+
+	std::int64_t idx_next = std::distance(spectral_.begin(), it_next);
+	std::int64_t idx_prev = std::distance(spectral_.begin(), it_prev);
+
+	// 4. 両隣での断面積を計算 (温度依存性込み)
+	double val_prev = interpolateTemperature_(idx_prev, temperature);
+	double val_next = interpolateTemperature_(idx_next, temperature);
+
+	// 5. 線形補間
+	double w_prev = *it_prev;
+	double w_next = *it_next;
+	
+	// ratio = (x - x1) / (x2 - x1)
+	double ratio = (spectral - w_prev) / (w_next - w_prev);
+
+	// y = y1 + ratio * (y2 - y1)
+	return val_prev + ratio * (val_next - val_prev);
+}
+
+}

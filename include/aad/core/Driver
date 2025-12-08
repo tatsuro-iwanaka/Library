@@ -1,0 +1,147 @@
+#pragma once
+
+#include "Types"
+#include "Geometry"
+#include "Forward"
+#include "Adjoint"
+
+namespace aad::core
+{
+
+RadiativeLayer computeAtmosphere(const std::vector<RadiativeLayer>&, const Geometry&);
+inline std::vector<RadiativeLayer> computeAtmosphere_adjoint(const std::vector<RadiativeLayer>&, const Geometry&,  const RadiativeLayer&);
+
+inline RadiativeLayer computeAtmosphere(const std::vector<RadiativeLayer>& initial_layers, const Geometry& geo)
+{
+	int n_layer = initial_layers.size();
+	bool enable_surface = false;
+
+	if(initial_layers.front().is_surface == true)
+	{
+		// n_layer --;
+		enable_surface = true;
+	}
+	
+	RadiativeLayer result_layer;
+
+	for(int i = 0; i < n_layer; ++i)
+	{
+		auto layer = initial_layers[i];
+
+		if(!initial_layers[i].is_surface)
+		{
+			int n_doubling = initial_layers[i].n_doubling;
+
+			for(int j = 0; j < n_doubling; ++j)
+			{
+				layer = doubleLayer(layer, geo);
+			}
+		}
+
+		if(i == 0)
+		{
+			result_layer = layer;
+		}
+		else
+		{
+			result_layer = addLayer(result_layer, layer, geo);
+		}
+	}
+
+	return result_layer;
+}
+
+inline std::vector<RadiativeLayer> computeAtmosphere_adjoint(const std::vector<RadiativeLayer>& initial_layers, const Geometry& geo,  const RadiativeLayer& adj_result)
+{
+	int n_layer = initial_layers.size();
+	
+	std::vector<RadiativeLayer> layers_doubled(n_layer);
+	std::vector<RadiativeLayer> cumulative_layers;
+	cumulative_layers.reserve(n_layer);
+
+	RadiativeLayer current_cumulative;
+
+	for(int i = 0; i < n_layer; ++i)
+	{
+		// Adding前の状態(Bottom側)を保存
+		// i=0(地表)のときは「何もない」ので保存不要、またはダミー
+		if (i > 0)
+		{
+			cumulative_layers.push_back(current_cumulative);
+		}
+
+		// Doubling
+		RadiativeLayer layer = initial_layers[i];
+		if (!layer.is_surface) // または if(layer.n_doubling > 0) のほうが合理的？？
+		{
+			for(int j = 0; j < layer.n_doubling; ++j)
+			{
+				layer = doubleLayer(layer, geo);
+			}
+		}
+		layers_doubled[i] = layer;
+
+		// Adding
+		if(i == 0)
+		{
+			current_cumulative = layer;
+		}
+		else
+		{
+			current_cumulative = addLayer(current_cumulative, layer, geo);
+		}
+	}
+
+	RadiativeLayer current_adj = adj_result; 
+	
+	std::vector<RadiativeLayer> adj_initial_layers(n_layer);
+
+	for(int i = n_layer - 1; i >= 0; --i)
+	{
+		RadiativeLayer adj_layer_doubled;
+
+		// Un-Adding
+		if (i == 0)
+		{
+			// ベース層（地表）なので、降りてきた勾配をそのまま受け取る
+			adj_layer_doubled = current_adj; 
+		}
+		else
+		{
+			auto grads = addLayer_adjoint(cumulative_layers[i-1], layers_doubled[i], geo, current_adj);
+			
+			RadiativeLayer adj_bot = grads[0];
+			RadiativeLayer adj_top = grads[1];
+
+			current_adj = adj_bot;
+			adj_layer_doubled = adj_top;
+		}
+
+		// Un-Doubling
+		RadiativeLayer adj_layer_init = adj_layer_doubled;
+		
+		if (!initial_layers[i].is_surface)
+		{
+			std::vector<RadiativeLayer> doubling_history;
+			RadiativeLayer temp = initial_layers[i];
+			doubling_history.push_back(temp);
+
+			for(int j = 0; j < initial_layers[i].n_doubling; ++j)
+			{
+				temp = doubleLayer(temp, geo);
+				doubling_history.push_back(temp); // k=j+1
+			}
+			
+			for(int j = initial_layers[i].n_doubling - 1; j >= 0; --j)
+			{
+				adj_layer_init = doubleLayer_adjoint(doubling_history[j], geo, adj_layer_init);
+			}
+		}
+		
+		adj_initial_layers[i] = adj_layer_init;
+	}
+
+	return adj_initial_layers;
+}
+
+}

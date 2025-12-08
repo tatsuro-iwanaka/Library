@@ -4,9 +4,7 @@
 #include<vector>
 #include<algorithm>
 
-#include<omp.h>
-
-namespace spline
+namespace aad::utils
 {
 
 enum class Boundary{Natural, Clamped};

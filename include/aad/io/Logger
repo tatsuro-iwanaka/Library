@@ -1,6 +1,7 @@
 #pragma once
 
-#include "chronoflux"
+#include "../utils/Chronoflux"
+
 #include <ctime>
 #include <fstream>
 #include <iomanip>
@@ -9,10 +10,12 @@
 #include <sstream>
 #include <string>
 #include <vector>
+#include <memory>
 #include <mutex>
 
-namespace logger
+namespace aad::io
 {
+
 enum class Level{Trace, Debug, Info, Warn, Error, Fatal};
 
 inline std::string levelName(Level lv)
@@ -142,7 +145,7 @@ private:
 	Level level_;
 	std::string component_;
 	std::string timer_name_;
-	chronoflux::TimePoint start_time_; // 処理時間計測用の高精度クロック
+	utils::TimePoint start_time_; // 処理時間計測用の高精度クロック
 
 public:
 	ScopedTimer(Log&, std::string, std::string, Level);
@@ -158,7 +161,7 @@ inline void ConsoleSink::write(const Record& r)
 {
 	std::ostream& os = to_stderr_ ? std::cerr : std::cout;
 	
-	os << chronoflux::now(9.0).format("%4Y-%2m-%2d %2H:%2M:%2S.%3f") << " [" << levelName(r.level) << "]" << std::flush;
+	os << utils::now(9.0).format("%4Y-%2m-%2d %2H:%2M:%2S.%3f") << " [" << levelName(r.level) << "]" << std::flush;
 
 	if (!r.component.empty())
 	{
@@ -180,7 +183,7 @@ inline void FileSink::write(const Record& r)
 {
 	if (!ofs_.is_open()) open_();
 
-	ofs_ << chronoflux::now(9.0).format("%4Y-%2m-%2d %2H:%2M:%2S.%3f") << " [" << levelName(r.level) << "]" << std::flush;
+	ofs_ << utils::now(9.0).format("%4Y-%2m-%2d %2H:%2M:%2S.%3f") << " [" << levelName(r.level) << "]" << std::flush;
 	
 	if (!r.component.empty())
 	{
@@ -303,7 +306,7 @@ inline LogLine Log::logstream(Level level, std::string component)
 	return LogLine(this, level, std::move(component), active);
 }
 
-inline ScopedTimer::ScopedTimer(Log& logger, std::string component, std::string timer_name, Level level = Level::Info) : logger_(logger), level_(level), component_(std::move(component)), timer_name_(std::move(timer_name)), start_time_(chronoflux::now(9.0))
+inline ScopedTimer::ScopedTimer(Log& logger, std::string component, std::string timer_name, Level level = Level::Info) : logger_(logger), level_(level), component_(std::move(component)), timer_name_(std::move(timer_name)), start_time_(utils::now(9.0))
 {
 	;
 }
@@ -316,7 +319,7 @@ inline ScopedTimer::~ScopedTimer()
 	// 4. 汎用logメソッドを使ってログを出力
 	// logger_.log(level_, component_, oss.str());
 
-	logger_.logstream(level_, component_) << timer_name_ << " took " << std::fixed << std::setprecision(3) << (chronoflux::now(9.0) - start_time_).toTotalMilliseconds() << " ms";
+	logger_.logstream(level_, component_) << timer_name_ << " took " << std::fixed << std::setprecision(3) << (utils::now(9.0) - start_time_).toTotalMilliseconds() << " ms";
 }
 
 inline Log& global()
