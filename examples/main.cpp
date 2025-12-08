@@ -24,14 +24,14 @@ aad::core::RadiativeLayer initializeIsotropicLayer(double target_tau, double ome
 	layer.source_up = Eigen::VectorXd::Zero(geo.Ntheta);
 	layer.source_down = Eigen::VectorXd::Zero(geo.Ntheta);
 	layer.reflectance_m_top_cos.resize(geo.M + 1);
-    layer.reflectance_m_bottom_cos.resize(geo.M + 1);
-    layer.transmittance_m_top_cos.resize(geo.M + 1);
-    layer.transmittance_m_bottom_cos.resize(geo.M + 1);
-    
-    layer.reflectance_m_top_sin.resize(geo.M + 1);
-    layer.reflectance_m_bottom_sin.resize(geo.M + 1);
-    layer.transmittance_m_top_sin.resize(geo.M + 1);
-    layer.transmittance_m_bottom_sin.resize(geo.M + 1);
+	layer.reflectance_m_bottom_cos.resize(geo.M + 1);
+	layer.transmittance_m_top_cos.resize(geo.M + 1);
+	layer.transmittance_m_bottom_cos.resize(geo.M + 1);
+	
+	layer.reflectance_m_top_sin.resize(geo.M + 1);
+	layer.reflectance_m_bottom_sin.resize(geo.M + 1);
+	layer.transmittance_m_top_sin.resize(geo.M + 1);
+	layer.transmittance_m_bottom_sin.resize(geo.M + 1);
 
 	for(int m=0; m <= geo.M; ++m)
 	{
@@ -41,9 +41,9 @@ aad::core::RadiativeLayer initializeIsotropicLayer(double target_tau, double ome
 		layer.transmittance_m_bottom_cos[m] = Eigen::MatrixXd::Zero(geo.Ntheta, geo.Ntheta);
 
 		layer.reflectance_m_top_sin[m] = Eigen::MatrixXd::Zero(geo.Ntheta, geo.Ntheta);
-        layer.reflectance_m_bottom_sin[m] = Eigen::MatrixXd::Zero(geo.Ntheta, geo.Ntheta);
-        layer.transmittance_m_top_sin[m] = Eigen::MatrixXd::Zero(geo.Ntheta, geo.Ntheta);
-        layer.transmittance_m_bottom_sin[m] = Eigen::MatrixXd::Zero(geo.Ntheta, geo.Ntheta);
+		layer.reflectance_m_bottom_sin[m] = Eigen::MatrixXd::Zero(geo.Ntheta, geo.Ntheta);
+		layer.transmittance_m_top_sin[m] = Eigen::MatrixXd::Zero(geo.Ntheta, geo.Ntheta);
+		layer.transmittance_m_bottom_sin[m] = Eigen::MatrixXd::Zero(geo.Ntheta, geo.Ntheta);
 	}
 
 	for (int i = 0; i < geo.Ntheta; ++i)
@@ -76,15 +76,15 @@ int main(void)
 	std::vector<double> layer_omegas(n_layer);
 
 	for(int i = 0; i < n_layer; ++i)
-    {
-        if (i < n_layer / 2)
+	{
+		if (i < n_layer / 2)
 		{
-            layer_omegas[i] = 0.9; // 下層 (Bottom)
-        }
+			layer_omegas[i] = 0.9;
+		}
 		else
 		{
-            layer_omegas[i] = 0.1; // 上層 (Top)
-        }
+			layer_omegas[i] = 0.1;
+		}
 	}
 	
 	std::vector<aad::core::RadiativeLayer> layers(n_layer);
@@ -96,15 +96,14 @@ int main(void)
 	}
 
 	auto result = aad::core::computeAtmosphere(layers, geo);
-	std::cout << result.reflectance_m_top_cos[0](0, 0) << ", " << result.optical_thickness << std::endl;
 
-	// テスト用：有限差分法で計算
+	std::cout << "Central Finite Difference" << std::endl;
 	for(int i = 0; i < n_layer; ++i)
 	{
 		std::vector<aad::core::RadiativeLayer> layers_p(n_layer);
 		std::vector<aad::core::RadiativeLayer> layers_m(n_layer);
 
-		double dtau = layers[i].optical_thickness * 1.0E-3;
+		double dtau = layers[i].optical_thickness * 1.0E-4;
 
 		for(int j = 0; j < layers.size(); ++j)
 		{
@@ -128,67 +127,55 @@ int main(void)
 		std::cout << "Layer " << i << " (Top=" << (n_layer-1) << "): " << std::scientific << std::setprecision(8) << dj << std::endl;
 	}
 
-    // 「ナディア反射率に対する感度」を知りたいので、その要素の勾配を 1.0 にする
-    aad::core::RadiativeLayer adj_result = result; // 構造をコピー
-    
-    adj_result.optical_thickness = 0.0;
-    adj_result.source_up.setZero();
-    adj_result.source_down.setZero();
-    for(int m=0; m<=geo.M; ++m)
+	aad::core::RadiativeLayer adj_result = result;
+	
+	adj_result.optical_thickness = 0.0;
+	adj_result.source_up.setZero();
+	adj_result.source_down.setZero();
+	for(int m=0; m<=geo.M; ++m)
 	{
-        adj_result.reflectance_m_top_cos[m].setZero();
-        adj_result.reflectance_m_bottom_cos[m].setZero();
-        adj_result.transmittance_m_top_cos[m].setZero();
-        adj_result.transmittance_m_bottom_cos[m].setZero();
-        adj_result.reflectance_m_top_sin[m].setZero();
-        adj_result.reflectance_m_bottom_sin[m].setZero();
-        adj_result.transmittance_m_top_sin[m].setZero();
-        adj_result.transmittance_m_bottom_sin[m].setZero();
-    }
+		adj_result.reflectance_m_top_cos[m].setZero();
+		adj_result.reflectance_m_bottom_cos[m].setZero();
+		adj_result.transmittance_m_top_cos[m].setZero();
+		adj_result.transmittance_m_bottom_cos[m].setZero();
+		adj_result.reflectance_m_top_sin[m].setZero();
+		adj_result.reflectance_m_bottom_sin[m].setZero();
+		adj_result.transmittance_m_top_sin[m].setZero();
+		adj_result.transmittance_m_bottom_sin[m].setZero();
+	}
 
 	adj_result.reflectance_m_top_cos[0](0, 0) = 1.0;
 	auto adj_layers = aad::core::computeAtmosphere_adjoint(layers, geo, adj_result);
 
-	// 5. Chain Rule (初期層の勾配 -> 全層のTauへの勾配)
-    std::cout << "\nSensitivity (dJ / dTau_total):" << std::endl;
-    for(int i = 0; i < n_layer; ++i)
-    {
-        double n_doubling_pow = std::pow(2.0, layers[i].n_doubling);
-        double omega = layer_omegas[i];
+	std::cout << "Adjoint" << std::endl;
+	for(int i = 0; i < n_layer; ++i)
+	{
+		double n_doubling_pow = std::pow(2.0, layers[i].n_doubling);
+		double omega = layer_omegas[i];
 
-        // A. 倍加計算の内部で tau が直接使われている部分からの勾配 (exp(-tau/mu)など)
-        double grad_tau_init = adj_layers[i].optical_thickness;
+		double grad_tau_init = adj_layers[i].optical_thickness;
 
-        // B. 初期化時の行列 (R, T) からの勾配
-        // initializeIsotropicLayer で R = C * tau としているので、
-        // dJ/dtau = dJ/dR * dR/dtau = dJ/dR * (R / tau)
-        // ※ R, T は tau に比例する
-        double grad_from_matrices = 0.0;
-        
-        for(int u=0; u<n_theta; ++u)
+		double grad_from_matrices = 0.0;
+		
+		for(int u=0; u<n_theta; ++u)
 		{
-            for(int v=0; v<n_theta; ++v)
+			for(int v=0; v<n_theta; ++v)
 			{
-                // dR / dtau_init = omega / (4 * mu * mu')
-                double deriv_coeff = omega / (4.0 * geo.mu(u) * geo.mu(v));
-                
-                // 各行列成分からの寄与を足し合わせる
-                grad_from_matrices += adj_layers[i].reflectance_m_top_cos[0](u, v) * deriv_coeff;
-                grad_from_matrices += adj_layers[i].reflectance_m_bottom_cos[0](u, v) * deriv_coeff;
-                grad_from_matrices += adj_layers[i].transmittance_m_top_cos[0](u, v) * deriv_coeff;
-                grad_from_matrices += adj_layers[i].transmittance_m_bottom_cos[0](u, v) * deriv_coeff;
-            }
-        }
+				double deriv_coeff = omega / (4.0 * geo.mu(u) * geo.mu(v));
+				
+				grad_from_matrices += adj_layers[i].reflectance_m_top_cos[0](u, v) * deriv_coeff;
+				grad_from_matrices += adj_layers[i].reflectance_m_bottom_cos[0](u, v) * deriv_coeff;
+				grad_from_matrices += adj_layers[i].transmittance_m_top_cos[0](u, v) * deriv_coeff;
+				grad_from_matrices += adj_layers[i].transmittance_m_bottom_cos[0](u, v) * deriv_coeff;
+			}
+		}
 
-        // tau_init に対する全勾配
-        double total_grad_init = grad_tau_init + grad_from_matrices;
-        
-        // tau_total に対する勾配に変換
-        // tau_init = tau_total / 2^N  =>  d/d_total = d/d_init * (1/2^N)
-        double grad_total = total_grad_init / n_doubling_pow;
+		double total_grad_init = grad_tau_init + grad_from_matrices;
+		
+		double grad_total = total_grad_init / n_doubling_pow;
 
-        std::cout << "Layer " << i << " (Top=" << (n_layer-1) << "): " << std::scientific << std::setprecision(8) << grad_total << std::endl;
-    }
+		std::cout << "Layer " << i << " (Top=" << (n_layer-1) << "): " << std::scientific << std::setprecision(8) << grad_total << std::endl;
+	}
 
 	return 0;
 }
