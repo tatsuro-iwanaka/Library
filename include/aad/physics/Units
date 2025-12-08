@@ -1,7 +1,9 @@
 #pragma once
 
 #include <string>
+#include <stdexcept>
 #include "../utils/String"
+#include "../io/Logger"
 
 namespace aad::physics
 {
@@ -67,8 +69,8 @@ inline UnitInfo getUnitInfo(std::string unit_input)
 	if (u == "ppb") return { UnitDim::Dimensionless, 1.0E-9 };
 	if (u == "ppt") return { UnitDim::Dimensionless, 1.0E-12 };
 	
-	// logger::global().fatal("getUnitInfo") << "Unknown unit: " + unit_input;
-	// throw std::runtime_error("Unknown unit: " + unit_input);
+	io::global().fatal("getUnitInfo") << "Unknown unit: " + unit_input;
+	throw std::runtime_error("Unknown unit: " + unit_input);
 }
 
 inline double scaleUnit(std::string unit_input, std::string unit_output)
@@ -78,8 +80,8 @@ inline double scaleUnit(std::string unit_input, std::string unit_output)
 
 	if (inInfo.dim != outInfo.dim)
 	{
-		// logger::global().fatal("scaleUnit") << "Unit dimension mismatch: cannot convert from `" + unit_input + "` to `" + unit_output + "`";
-		// throw std::runtime_error("Unit dimension mismatch: cannot convert from `" + unit_input + "` to `" + unit_output + "`");
+		io::global().fatal("scaleUnit") << "Unit dimension mismatch: cannot convert from `" + unit_input + "` to `" + unit_output + "`";
+		throw std::runtime_error("Unit dimension mismatch: cannot convert from `" + unit_input + "` to `" + unit_output + "`");
 	}
 	// input→SI→output の合成倍率
 	return inInfo.to_si / outInfo.to_si;

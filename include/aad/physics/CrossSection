@@ -211,7 +211,7 @@ inline void ArrheniusCrossSectionModel::loadNetCDF(const std::string& filename, 
 			temperature[j] = buf_temperature[j] * scale_temp;
 		}
 
-		sort(spectral, temperature, cross_section);
+		utils::sort(spectral, temperature, cross_section);
 
 		spectral_ = spectral;
 		

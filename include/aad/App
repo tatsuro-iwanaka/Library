@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Core"
 #include "app/Builder"
 #include "app/Solver"
 #include "app/RadiativeTransfer"

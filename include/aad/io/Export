@@ -18,7 +18,7 @@
 namespace aad::io
 {
 
-inline void exportResultNetCDF(const std::string& filename, const physics::RadiativeTransferResult& result, const physics::SimulationInformation& sim_info, const physics::AtmosphereModel& atmosphere, const core::Geometry& geometry, const physics::SpectralInformation& spectral_info)
+inline void exportResultNetCDF(const physics::RadiativeTransferResult& result, const physics::SimulationInformation& sim_info, const physics::AtmosphereModel& atmosphere, const core::Geometry& geometry, const physics::SpectralInformation& spectral_info)
 {
 	std::string filename = sim_info.directory_name + sim_info.result_name;
 

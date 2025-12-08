@@ -149,7 +149,9 @@ inline physics::MonochromeData RadiativeTransferSolver::computeMonochrome(const 
 		result.species_scattering_phase_function[i] = atmosphere_layer_opt[i].species_scattering_phase_function;
 	}
 
+	io::global().info("RadiativeTransferSolver::computeMonochrome") << "Computing atmosphere for " << spectral << (dimension == physics::SpectralCoordinateDimension::Wavenumber ? "m-1" : "m") << ".";
 	result_layer_rad = core::computeAtmosphere(atmosphere_layer_rad, geometry_);
+	io::global().info("RadiativeTransferSolver::computeMonochrome") << "Finished computing atmosphere for " << spectral << (dimension == physics::SpectralCoordinateDimension::Wavenumber ? "m-1" : "m") << ".";
 
 	result.reflectance_m_top_cos = result_layer_rad.reflectance_m_top_cos;
 	result.reflectance_m_top_sin = result_layer_rad.reflectance_m_top_sin;
