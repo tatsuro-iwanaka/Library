@@ -72,16 +72,16 @@ $$
 Here, terms like $SE$ and $R_\mathrm{top}E$ represent the contribution from the direct beam scattered into the diffuse field at the interface.
 
 ### 4. Resulting Layer Properties
-Finally, the reflection ($R^{\mathrm{res}}$) and transmission ($T^{\mathrm{res}}$) matrices for the combined layer are:
+Finally, the reflection ($R^\mathrm{res}$) and transmission ($T^\mathrm{res}$) matrices for the combined layer are:
 
 $$
 \begin{aligned}
-R_\mathrm{top}^{\mathrm{res}} &= c T_\mathrm{bot} W U + R_\mathrm{top} + E U \\
-T_\mathrm{top}^{\mathrm{res}} &= c T_\mathrm{top} W D + T_\mathrm{top} E + E D
+R_\mathrm{top}^\mathrm{res} &= c T_\mathrm{bot} W U + R_\mathrm{top} + E U \\
+T_\mathrm{top}^\mathrm{res} &= c T_\mathrm{top} W D + T_\mathrm{top} E + E D
 \end{aligned}
 $$
 
-For the doubling method (where top and bottom layers are identical), $R_\mathrm{bot}^{\mathrm{res}} = R_\mathrm{top}^{\mathrm{res}}$ and $T_\mathrm{bot}^{\mathrm{res}} = T_\mathrm{top}^{\mathrm{res}}$.
+For the doubling method (where top and bottom layers are identical), $R_\mathrm{bot}^\mathrm{res} = R_\mathrm{top}^\mathrm{res}$ and $T_\mathrm{bot}^\mathrm{res} = T_\mathrm{top}^\mathrm{res}$.
 
 ## Matrix Formulation of Adding Equations
 
@@ -124,14 +124,14 @@ U &= c R^\mathrm{bot}_\mathrm{top} W D + R^\mathrm{bot}_\mathrm{top} E^\mathrm{t
 $$
 
 ### 4. Resulting Layer Properties
-Finally, the reflection ($R^{\mathrm{res}}_\mathrm{top}$) and transmission ($T^{\mathrm{res}}_\mathrm{top}$) matrices for the combined layer (incident from space) are:
+Finally, the reflection ($R_\mathrm{top}^\mathrm{res}$) and transmission ($T_\mathrm{top}^\mathrm{res}$) matrices for the combined layer (incident from space) are:
 
 $$
 \begin{aligned}
-R_\mathrm{top}^{\mathrm{res}} &= c T^\mathrm{top}_\mathrm{bot} W U + R^\mathrm{top}_\mathrm{top} + E^\mathrm{top} U \\
-T_\mathrm{top}^{\mathrm{res}} &= c T^\mathrm{bot}_\mathrm{top} W D + T^\mathrm{bot}_\mathrm{top} E^\mathrm{top} + E^\mathrm{bot} D
+R_\mathrm{top}^\mathrm{res} &= c T^\mathrm{top}_\mathrm{bot} W U + R^\mathrm{top}_\mathrm{top} + E^\mathrm{top} U \\
+T_\mathrm{top}^\mathrm{res} &= c T^\mathrm{bot}_\mathrm{top} W D + T^\mathrm{bot}_\mathrm{top} E^\mathrm{top} + E^\mathrm{bot} D
 \end{aligned}
 $$
 
 > **Note:**
-> As seen in the equations above, the reflection and transmission matrices for light incident from below the lower layer ($R^\mathrm{bot}_\mathrm{bot}$ and $T^\mathrm{bot}_\mathrm{bot}$) are not required to compute $R_\mathrm{top}^{\mathrm{res}}$ and $T_\mathrm{top}^{\mathrm{res}}$. Therefore, for simulations considering only satellite observations, calculating the response for light incident from the bottom of the combined layer is unnecessary.
+> As seen in the equations above, the reflection and transmission matrices for light incident from below the lower layer ($R^\mathrm{bot}_\mathrm{bot}$ and $T^\mathrm{bot}_\mathrm{bot}$) are not required to compute $R_\mathrm{top}^\mathrm{res}$ and $T_\mathrm{top}^\mathrm{res}$. Therefore, for simulations considering only satellite observations, calculating the response for light incident from the bottom of the combined layer is unnecessary.
