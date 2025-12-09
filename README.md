@@ -134,4 +134,4 @@ T_\mathrm{top}^\mathrm{res} &= c T^\mathrm{bot}_\mathrm{top} W D + T^\mathrm{bot
 $$
 
 > **Note:**
-> As seen in the equations above, the reflection and transmission matrices for light incident from below the lower layer ($R^\mathrm{bot}_\mathrm{bot}$ and $T^\mathrm{bot}_\mathrm{bot}$) are not required to compute $R_\mathrm{top}^\mathrm{res}$ and $T_\mathrm{top}^\mathrm{res}$. Therefore, for simulations considering only satellite observations, calculating the response for light incident from the bottom of the combined layer is unnecessary.
+> As seen in the equations above, the reflection and transmission matrices for light incident from below the lower layer ($R_\mathrm{bot}^\mathrm{bot}$ and $T_\mathrm{bot}^\mathrm{bot}$) are not required to compute $R_\mathrm{top}^\mathrm{res}$ and $T_\mathrm{top}^\mathrm{res}$. Therefore, for simulations considering only satellite observations, calculating the response for light incident from the bottom of the combined layer is unnecessary.
