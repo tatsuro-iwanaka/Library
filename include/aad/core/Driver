@@ -28,6 +28,8 @@ inline RadiativeLayer computeAtmosphere(const std::vector<RadiativeLayer>& initi
 
 	for(int i = 0; i < n_layer; ++i)
 	{
+		io::global().info("RadiativeTransferSolver::computeAtmosphere") << "Computing layer " << i << ".";
+
 		auto layer = initial_layers[i];
 
 		if(!initial_layers[i].is_surface)

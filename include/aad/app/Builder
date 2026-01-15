@@ -220,6 +220,7 @@ inline std::vector<physics::Species> ModelBuilder::buildSpecies_(const physics::
 			if(s.scatter_type == physics::ScatterType::Mie)
 			{
 				s.refractive_index.resize(n_layers);
+				s.size_distribution_finction = s_input.size_distribution.value();
 
 				if(s_input.refractive_index_type.value() == physics::RefractiveIndexType::Constant)
 				{
@@ -293,8 +294,11 @@ inline std::vector<physics::Species> ModelBuilder::buildSpecies_(const physics::
 						loaded_data = io::loadRefractiveIndexSpectralVerticalFile(s_input.filename_refractive_index_spectral_vertical.value(), s_input.varname_refractive_index_spectral_vertical_altitude.value(), s_input.varname_refractive_index_spectral_vertical_spectral.value(), s_input.varname_refractive_index_spectral_vertical_nr.value(), s_input.varname_refractive_index_spectral_vertical_ni.value(), "m", "m-1");
 					}
 
+					// std::cout << "Refractive Index File Loaded." << std::endl;
+
 					// 入力データの高度リストを作成（検索用）
-					std::vector<double> input_alts(loaded_data.size());
+					std::vector<double> input_alts;
+					input_alts.reserve(loaded_data.size());
 					for(const auto& layer : loaded_data)
 					{
 						input_alts.push_back(layer[0][0]);
@@ -414,42 +418,63 @@ inline std::vector<physics::Species> ModelBuilder::buildSpecies_(const physics::
 							}
 						}
 					}
+
+					// std::cout << "Refractive Index Interpolated." << std::endl;
 				}
 
 				if(s_input.size_distribution.value() == physics::ParticleSizeDistribution::Delta)
 				{
 					s.particle_size_distribution = {{s_input.delta_r.value() * physics::scaleUnit(s_input.unit_input_radius.value(), "m"), 1.0}};
 					s.weight_particle_size_distribution = {{s_input.delta_r.value() * physics::scaleUnit(s_input.unit_input_radius.value(), "m"), 1.0}};
+
+					s.delta_r = s_input.delta_r.value() * physics::scaleUnit(s_input.unit_input_radius.value(), "m");
 				}
 				else if(s_input.size_distribution.value() == physics::ParticleSizeDistribution::Rectangular)
 				{
 					auto node_weight = physics::generateRectangularSizeDistribution(s_input.count_radius.value(), s_input.rect_r_mean.value() * physics::scaleUnit(s_input.unit_input_radius.value(), "m"), s_input.rect_width.value() * physics::scaleUnit(s_input.unit_input_radius.value(), "m"));
 					s.particle_size_distribution = node_weight[0]; // 本当は不要
 					s.weight_particle_size_distribution = node_weight[1];
+
+					s.rect_r_mean = s_input.rect_r_mean.value() * physics::scaleUnit(s_input.unit_input_radius.value(), "m");
+					s.rect_width = s_input.rect_width.value() * physics::scaleUnit(s_input.unit_input_radius.value(), "m");
 				}
 				else if(s_input.size_distribution.value() == physics::ParticleSizeDistribution::Gamma)
 				{
 					auto node_weight = physics::generateGammaSizeDistribution(s_input.count_radius.value(), s_input.gd_a.value() * physics::scaleUnit(s_input.unit_input_radius.value(), "m"), s_input.gd_b.value());
 					s.particle_size_distribution = node_weight[0]; // 本当は不要
 					s.weight_particle_size_distribution = node_weight[1];
+
+					s.gd_a = s_input.gd_a.value() * physics::scaleUnit(s_input.unit_input_radius.value(), "m");
+					s.gd_b = s_input.gd_b.value();
 				}
 				else if(s_input.size_distribution.value() == physics::ParticleSizeDistribution::ModifiedGamma)
 				{
 					auto node_weight = physics::generateModifiedGammaSizeDistribution(s_input.count_radius.value(), s_input.mgd_r_c.value() * physics::scaleUnit(s_input.unit_input_radius.value(), "m"), s_input.mgd_alpha.value(), s_input.mgd_gamma.value());
 					s.particle_size_distribution = node_weight[0]; // 本当は不要
 					s.weight_particle_size_distribution = node_weight[1];
+
+					s.mgd_r_c = s_input.mgd_r_c.value() * physics::scaleUnit(s_input.unit_input_radius.value(), "m");
+					s.mgd_alpha = s_input.mgd_alpha.value();
+					s.mgd_gamma = s_input.mgd_gamma.value();
 				}
 				else if(s_input.size_distribution.value() == physics::ParticleSizeDistribution::LogNormal)
 				{
 					auto node_weight = physics::generateLogNormalSizeDistribution(s_input.count_radius.value(), s_input.lnd_r_g.value() * physics::scaleUnit(s_input.unit_input_radius.value(), "m"), s_input.lnd_sigma_g.value());
 					s.particle_size_distribution = node_weight[0]; // 本当は不要
 					s.weight_particle_size_distribution = node_weight[1];
+
+					s.lnd_r_g = s_input.lnd_r_g.value() * physics::scaleUnit(s_input.unit_input_radius.value(), "m");
+					s.lnd_sigma_g = s_input.lnd_sigma_g.value();
 				}
 				else if(s_input.size_distribution.value() == physics::ParticleSizeDistribution::PowerLaw)
 				{
 					auto node_weight = physics::generatePowerLawSizeDistribution(s_input.count_radius.value(), s_input.pl_delta.value(), s_input.pl_r1.value() * physics::scaleUnit(s_input.unit_input_radius.value(), "m"), s_input.pl_r2.value() * physics::scaleUnit(s_input.unit_input_radius.value(), "m"));
 					s.particle_size_distribution = node_weight[0]; // 本当は不要
 					s.weight_particle_size_distribution = node_weight[1];
+
+					s.pl_delta = s_input.pl_delta.value();
+					s.pl_r1 = s_input.pl_r1.value() * physics::scaleUnit(s_input.unit_input_radius.value(), "m");
+					s.pl_r2 = s_input.pl_r2.value() * physics::scaleUnit(s_input.unit_input_radius.value(), "m");
 				}
 			}
 		}
@@ -886,6 +911,7 @@ inline physics::AtmosphereModel ModelBuilder::buildAtmosphereModel(const physics
 	if(model.surface_type != physics::SurfaceType::NoSurface)
 	{
 		model.surface_albedo = configuration.surface.albedo.value();
+		model.surface_emissivity = configuration.surface.emissivity.value();
 		model.surface_temperature = configuration.surface.temperature.value();
 	}
 
@@ -903,7 +929,11 @@ inline physics::AtmosphereModel ModelBuilder::buildAtmosphereModel(const physics
 		}
 	}
 
+	io::global().info("ModelBuilder::buildAtmosphereModel") << "Atmospheric layering was loaded.";
+
 	model.species = buildSpecies_(configuration, model, spectral);
+
+	io::global().info("ModelBuilder::buildAtmosphereModel") << "Atmospheric Species were loaded.";
 
 	if(model.is_hitran)
 	{
@@ -930,6 +960,8 @@ inline physics::AtmosphereModel ModelBuilder::buildAtmosphereModel(const physics
 			model.diluent.H2O = dil_ratio[4];
 		}
 	}
+
+	io::global().info("ModelBuilder::buildAtmosphereModel") << "Atmospheric diluent was loaded.";
 
 	return model;
 }

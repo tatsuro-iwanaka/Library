@@ -77,9 +77,13 @@ inline void RadiativeTransfer::loadConfiguration(void)
 	simulation_ = ModelBuilder::buildSimulation(configuration_);
 	io::global().info("RadiativeTransfer::RadiativeTransfer") << "Radiative transfer calculation started.";
 	spectral_ = ModelBuilder::buildSpectral(configuration_);
+	io::global().info("RadiativeTransfer::RadiativeTransfer") << "Spectral grid was generated.";
 	geometry_ = ModelBuilder::buildGeometry(configuration_);
+	io::global().info("RadiativeTransfer::RadiativeTransfer") << "Calculation grid was constructed.";
 	atmosphere_model_ = ModelBuilder::buildAtmosphereModel(configuration_, spectral_);
+	io::global().info("RadiativeTransfer::RadiativeTransfer") << "Atmospheric model was built.";
 	delta_approximation_ = ModelBuilder::buildDeltaApproximation(configuration_);
+	io::global().info("RadiativeTransfer::RadiativeTransfer") << "Delta approximation was built.";
 	result_.Ntheta = geometry_.Ntheta;
 	result_.Nphi = geometry_.Nphi;
 	result_.Nmode = geometry_.M;
@@ -397,11 +401,21 @@ inline void RadiativeTransfer::run_adjoint(const std::vector<aad::core::Radiativ
 
 		result_adjoint_ = results_ajd[0];
 
+		// std::cout << results_ajd[0].layers[0].optical.scattering_phase_function.size() << std::endl;
+
 		for(int i = 1; i < n_spectral; ++i)
 		{
 			for(int j = 0; j < n_layer; ++j)
 			{
 				int n_species = results_ajd[i].layers[j].species.size();
+
+				result_adjoint_.layers[j].optical.optical_thickness += results_ajd[i].layers[j].optical.optical_thickness;
+				result_adjoint_.layers[j].optical.single_scattering_albedo += results_ajd[i].layers[j].optical.single_scattering_albedo;
+				
+				for(int k = 0; k < result_adjoint_.layers[j].optical.scattering_phase_function.size(); ++k)
+				{
+					result_adjoint_.layers[j].optical.scattering_phase_function[k][1] += results_ajd[i].layers[j].optical.scattering_phase_function[k][1];
+				}
 
 				for(int s = 0; s < n_species; ++s)
 				{

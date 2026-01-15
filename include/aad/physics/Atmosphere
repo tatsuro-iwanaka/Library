@@ -167,20 +167,20 @@ inline double computeThermalEmission(double plank_function, double tau, double m
 inline void Configuration::validateConfiguration(void)
 {
 	// Simulation
-	if(!simulation.simulation_name.has_value())
-	{
-		simulation.simulation_name = "untitled";
-		io::global().warn("Configuration::validateConfiguration") << "Simulation name was not specified. Automatically set to '" << simulation.simulation_name.value() << "'.";
-	}
-	if(!simulation.directory_name.has_value())
-	{
-		simulation.directory_name = "./";
-		if(simulation.directory_name.value()[simulation.directory_name.value().size() - 1] != '/')
-		{
-			simulation.directory_name = simulation.directory_name.value() + "/";
-		}
-		io::global().warn("Configuration::validateConfiguration") << "Working directroy was not specified. Automatically set to current directory.";
-	}
+	// if(!simulation.simulation_name.has_value())
+	// {
+	// 	simulation.simulation_name = "untitled";
+	// 	io::global().warn("Configuration::validateConfiguration") << "Simulation name was not specified. Automatically set to '" << simulation.simulation_name.value() << "'.";
+	// }
+	// if(!simulation.directory_name.has_value())
+	// {
+	// 	simulation.directory_name = "./";
+	// 	if(simulation.directory_name.value()[simulation.directory_name.value().size() - 1] != '/')
+	// 	{
+	// 		simulation.directory_name = simulation.directory_name.value() + "/";
+	// 	}
+	// 	io::global().warn("Configuration::validateConfiguration") << "Working directroy was not specified. Automatically set to current directory.";
+	// }
 	if(!simulation.result_name.has_value())
 	{
 		simulation.result_name = simulation.simulation_name.value() + ".nc";
@@ -485,6 +485,11 @@ inline void Configuration::validateConfiguration(void)
 		{
 			io::global().fatal("Configuration::validateConfiguration") << "surface_albedo was not specified.";
 			throw std::runtime_error("[Configuration::validateConfiguration] surface_albedo was not specified.");
+		}
+		if(!surface.albedo.has_value())
+		{
+			surface.emissivity = 1.0 - surface.albedo.value();
+			io::global().warn("Configuration::validateConfiguration") << "surface_emissivity was not specified. Automatically set to " << surface.emissivity.value() << "1-albedo.";
 		}
 		if(!surface.temperature.has_value())
 		{

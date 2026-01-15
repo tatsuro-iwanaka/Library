@@ -31,6 +31,14 @@ std::vector<std::vector<double>> computeHGScatteringFunction(int, double);
 
 double computeAsymmetryParameter(const std::vector<std::vector<double>>&);
 
+void computeDeltaMieDerivative(int, double, double, std::complex<double>, double&, double&, double&, std::vector<std::vector<double>>&);
+void computeLogNormalMieDerivative(int, double, double, double, std::complex<double>, double&, double&, double&, std::vector<std::vector<double>>&, double&, double&, double&, std::vector<std::vector<double>>&);
+void computeRectangularMieDerivative(int, double, double, double, std::complex<double>, double&, double&, double&, std::vector<std::vector<double>>&, double&, double&, double&, std::vector<std::vector<double>>&);
+void computeGammaMieDerivative(int, double, double, double, std::complex<double>, double&, double&, double&, std::vector<std::vector<double>>&, double&, double&, double&, std::vector<std::vector<double>>&);
+void computeModifiedGammaMieDerivative(int, double, double, double, double, std::complex<double>, double&, double&, double&, std::vector<std::vector<double>>&, double&, double&, double&, std::vector<std::vector<double>>&, double&, double&, double&, std::vector<std::vector<double>>&);
+void computePowerLawMieDerivative(int, double, double, double, double, std::complex<double>, double&, double&, double&, std::vector<std::vector<double>>&, double&, double&, double&, std::vector<std::vector<double>>&, double&, double&, double&, std::vector<std::vector<double>>&);
+
+
 inline void computeMieScattering(int n, double radius, double wavelength, std::complex<double> index, double& scattering_cross_section, double& absorption_cross_section, double& extinction_cross_section, std::vector<std::vector<double>>& phase_function)
 {
 	// Input validation
@@ -611,6 +619,288 @@ inline double computeAsymmetryParameter(const std::vector<std::vector<double>>& 
 	g = num / den;
 
 	return g;
+}
+
+
+inline void computeDeltaMieDerivative(int n_theta, double wavelength, double r, std::complex<double> index, double& dsigma_s_dr, double& dsigma_a_dr, double& dsigma_e_dr, std::vector<std::vector<double>>& dP_dr)
+{
+	double eps = 1.0E-5;
+	double d_r = r * eps;
+
+	double sigma_a_p_r, sigma_a_m_r;
+	double sigma_s_p_r, sigma_s_m_r;
+	double sigma_e_p_r, sigma_e_m_r;
+	std::vector<std::vector<double>> P_p_r, P_m_r;
+
+	computeMieScattering(n_theta, r + d_r, wavelength, index, sigma_s_p_r, sigma_a_p_r, sigma_e_p_r, P_p_r);
+	computeMieScattering(n_theta, r - d_r, wavelength, index, sigma_s_m_r, sigma_a_m_r, sigma_e_m_r, P_m_r);
+
+	dsigma_a_dr = (sigma_a_p_r - sigma_a_m_r) / (2.0 * d_r);
+	dsigma_s_dr = (sigma_s_p_r - sigma_s_m_r) / (2.0 * d_r);
+	dsigma_e_dr = (sigma_e_p_r - sigma_e_m_r) / (2.0 * d_r);
+
+	dP_dr.resize(n_theta, std::vector<double>(2, 0.0));
+	
+	for(int i = 0; i < n_theta; ++i)
+	{
+		dP_dr[i][0] = P_p_r[i][0];
+		dP_dr[i][1] = (P_p_r[i][1] - P_m_r[i][1]) / (2.0 * d_r);
+	}
+
+	return;
+}
+
+inline void computeLogNormalMieDerivative(int n_theta, double wavelength, double r_g, double sigma_g, std::complex<double> index, double& dsigma_s_dr_g, double& dsigma_a_dr_g, double& dsigma_e_dr_g, std::vector<std::vector<double>>& dP_dr_g, double& dsigma_s_dsigma_g, double& dsigma_a_dsigma_g, double& dsigma_e_dsigma_g, std::vector<std::vector<double>>& dP_dsigma_g)
+{
+	double eps = 1.0E-5;
+	double d_r_g = r_g * eps;
+	double d_sigma_g = sigma_g * eps;
+
+	auto sd_p_r_g = generateLogNormalSizeDistribution(16, r_g + d_r_g, sigma_g);
+	auto sd_m_r_g = generateLogNormalSizeDistribution(16, r_g - d_r_g, sigma_g);
+
+	auto sd_p_sigma_g = generateLogNormalSizeDistribution(16, r_g, sigma_g + d_sigma_g);
+	auto sd_m_sigma_g = generateLogNormalSizeDistribution(16, r_g, sigma_g - d_sigma_g);
+
+	double sigma_a_p_r_g, sigma_a_m_r_g, sigma_a_p_sigma_g, sigma_a_m_sigma_g;
+	double sigma_s_p_r_g, sigma_s_m_r_g, sigma_s_p_sigma_g, sigma_s_m_sigma_g;
+	double sigma_e_p_r_g, sigma_e_m_r_g, sigma_e_p_sigma_g, sigma_e_m_sigma_g;
+	std::vector<std::vector<double>> P_p_r_g, P_m_r_g, P_p_sigma_g, P_m_sigma_g;
+
+	computeMieScatteringSizeDistribution(n_theta, wavelength, sd_p_r_g[1], index, sigma_s_p_r_g, sigma_a_p_r_g, sigma_e_p_r_g, P_p_r_g);
+	computeMieScatteringSizeDistribution(n_theta, wavelength, sd_m_r_g[1], index, sigma_s_m_r_g, sigma_a_m_r_g, sigma_e_m_r_g, P_m_r_g);
+
+	computeMieScatteringSizeDistribution(n_theta, wavelength, sd_p_sigma_g[1], index, sigma_s_p_sigma_g, sigma_a_p_sigma_g, sigma_e_p_sigma_g, P_p_sigma_g);
+	computeMieScatteringSizeDistribution(n_theta, wavelength, sd_m_sigma_g[1], index, sigma_s_m_sigma_g, sigma_a_m_sigma_g, sigma_e_m_sigma_g, P_m_sigma_g);
+
+	dsigma_a_dr_g = (sigma_a_p_r_g - sigma_a_m_r_g) / (2.0 * d_r_g);
+	dsigma_s_dr_g = (sigma_s_p_r_g - sigma_s_m_r_g) / (2.0 * d_r_g);
+	dsigma_e_dr_g = (sigma_e_p_r_g - sigma_e_m_r_g) / (2.0 * d_r_g);
+	dsigma_a_dsigma_g = (sigma_a_p_sigma_g - sigma_a_m_sigma_g) / (2.0 * d_sigma_g);
+	dsigma_s_dsigma_g = (sigma_s_p_sigma_g - sigma_s_m_sigma_g) / (2.0 * d_sigma_g);
+	dsigma_e_dsigma_g = (sigma_e_p_sigma_g - sigma_e_m_sigma_g) / (2.0 * d_sigma_g);
+
+	dP_dr_g.resize(n_theta, std::vector<double>(2, 0.0));
+	dP_dsigma_g.resize(n_theta, std::vector<double>(2, 0.0));
+	
+	for(int i = 0; i < n_theta; ++i)
+	{
+		dP_dr_g[i][0] = P_p_r_g[i][0];
+		dP_dr_g[i][1] = (P_p_r_g[i][1] - P_m_r_g[i][1]) / (2.0 * d_r_g);
+
+		dP_dsigma_g[i][0] = P_p_sigma_g[i][0];
+		dP_dsigma_g[i][1] = (P_p_sigma_g[i][1] - P_m_sigma_g[i][1]) / (2.0 * d_sigma_g);
+	}
+
+	return;
+}
+
+inline void computeRectangularMieDerivative(int n_theta, double wavelength, double r_mean, double width, std::complex<double> index, double& dsigma_s_dr_mean, double& dsigma_a_dr_mean, double& dsigma_e_dr_mean, std::vector<std::vector<double>>& dP_dr_mean, double& dsigma_s_dwidth, double& dsigma_a_dwidth, double& dsigma_e_dwidth, std::vector<std::vector<double>>& dP_dwidth)
+{
+	double eps = 1.0E-5;
+	double d_r_mean = r_mean * eps;
+	double d_width = width * eps;
+
+	auto sd_p_r_mean = generateRectangularSizeDistribution(n_theta, r_mean + d_r_mean, width);
+	auto sd_m_r_mean = generateRectangularSizeDistribution(n_theta, r_mean - d_r_mean, width);
+
+	auto sd_p_width = generateRectangularSizeDistribution(n_theta, r_mean, width + d_width);
+	auto sd_m_width = generateRectangularSizeDistribution(n_theta, r_mean, width - d_width);
+
+	double sigma_a_p_r_mean, sigma_a_m_r_mean, sigma_a_p_width, sigma_a_m_width;
+	double sigma_s_p_r_mean, sigma_s_m_r_mean, sigma_s_p_width, sigma_s_m_width;
+	double sigma_e_p_r_mean, sigma_e_m_r_mean, sigma_e_p_width, sigma_e_m_width;
+	std::vector<std::vector<double>> P_p_r_mean, P_m_r_mean, P_p_width, P_m_width;
+
+	computeMieScatteringSizeDistribution(n_theta, wavelength, sd_p_r_mean[1], index, sigma_s_p_r_mean, sigma_a_p_r_mean, sigma_e_p_r_mean, P_p_r_mean);
+	computeMieScatteringSizeDistribution(n_theta, wavelength, sd_m_r_mean[1], index, sigma_s_m_r_mean, sigma_a_m_r_mean, sigma_e_m_r_mean, P_m_r_mean);
+
+	computeMieScatteringSizeDistribution(n_theta, wavelength, sd_p_width[1], index, sigma_s_p_width, sigma_a_p_width, sigma_e_p_width, P_p_width);
+	computeMieScatteringSizeDistribution(n_theta, wavelength, sd_m_width[1], index, sigma_s_m_width, sigma_a_m_width, sigma_e_m_width, P_m_width);
+
+	dsigma_a_dr_mean = (sigma_a_p_r_mean - sigma_a_m_r_mean) / (2.0 * d_r_mean);
+	dsigma_s_dr_mean = (sigma_s_p_r_mean - sigma_s_m_r_mean) / (2.0 * d_r_mean);
+	dsigma_e_dr_mean = (sigma_e_p_r_mean - sigma_e_m_r_mean) / (2.0 * d_r_mean);
+	dsigma_a_dwidth = (sigma_a_p_width - sigma_a_m_width) / (2.0 * d_width);
+	dsigma_s_dwidth = (sigma_s_p_width - sigma_s_m_width) / (2.0 * d_width);
+	dsigma_e_dwidth = (sigma_e_p_width - sigma_e_m_width) / (2.0 * d_width);
+
+	dP_dr_mean.resize(n_theta, std::vector<double>(2, 0.0));
+	dP_dwidth.resize(n_theta, std::vector<double>(2, 0.0));
+	
+	for(int i = 0; i < n_theta; ++i)
+	{
+		dP_dr_mean[i][0] = P_p_r_mean[i][0];
+		dP_dr_mean[i][1] = (P_p_r_mean[i][1] - P_m_r_mean[i][1]) / (2.0 * d_r_mean);
+
+		dP_dwidth[i][0] = P_p_width[i][0];
+		dP_dwidth[i][1] = (P_p_width[i][1] - P_m_width[i][1]) / (2.0 * d_width);
+	}
+
+	return;
+}
+
+inline void computeGammaMieDerivative(int n_theta, double wavelength, double a, double b, std::complex<double> index, double& dsigma_s_da, double& dsigma_a_da, double& dsigma_e_da, std::vector<std::vector<double>>& dP_da, double& dsigma_s_db, double& dsigma_a_db, double& dsigma_e_db, std::vector<std::vector<double>>& dP_db)
+{
+	double eps = 1.0E-5;
+	double d_a = a * eps;
+	double d_b = b * eps;
+
+	auto sd_p_a = generateGammaSizeDistribution(n_theta, a + d_a, b);
+	auto sd_m_a = generateGammaSizeDistribution(n_theta, a - d_a, b);
+
+	auto sd_p_b = generateRectangularSizeDistribution(n_theta, a, b + d_b);
+	auto sd_m_b = generateRectangularSizeDistribution(n_theta, a, b - d_b);
+
+	double sigma_a_p_a, sigma_a_m_a, sigma_a_p_b, sigma_a_m_b;
+	double sigma_s_p_a, sigma_s_m_a, sigma_s_p_b, sigma_s_m_b;
+	double sigma_e_p_a, sigma_e_m_a, sigma_e_p_b, sigma_e_m_b;
+	std::vector<std::vector<double>> P_p_a, P_m_a, P_p_b, P_m_b;
+
+	computeMieScatteringSizeDistribution(n_theta, wavelength, sd_p_a[1], index, sigma_s_p_a, sigma_a_p_a, sigma_e_p_a, P_p_a);
+	computeMieScatteringSizeDistribution(n_theta, wavelength, sd_m_a[1], index, sigma_s_m_a, sigma_a_m_a, sigma_e_m_a, P_m_a);
+
+	computeMieScatteringSizeDistribution(n_theta, wavelength, sd_p_b[1], index, sigma_s_p_b, sigma_a_p_b, sigma_e_p_b, P_p_b);
+	computeMieScatteringSizeDistribution(n_theta, wavelength, sd_m_b[1], index, sigma_s_m_b, sigma_a_m_b, sigma_e_m_b, P_m_b);
+
+	dsigma_a_da = (sigma_a_p_a - sigma_a_m_a) / (2.0 * d_a);
+	dsigma_s_da = (sigma_s_p_a - sigma_s_m_a) / (2.0 * d_a);
+	dsigma_e_da = (sigma_e_p_a - sigma_e_m_a) / (2.0 * d_a);
+	dsigma_a_db = (sigma_a_p_b - sigma_a_m_b) / (2.0 * d_b);
+	dsigma_s_db = (sigma_s_p_b - sigma_s_m_b) / (2.0 * d_b);
+	dsigma_e_db = (sigma_e_p_b - sigma_e_m_b) / (2.0 * d_b);
+
+	dP_da.resize(n_theta, std::vector<double>(2, 0.0));
+	dP_db.resize(n_theta, std::vector<double>(2, 0.0));
+	
+	for(int i = 0; i < n_theta; ++i)
+	{
+		dP_da[i][0] = P_p_a[i][0];
+		dP_da[i][1] = (P_p_a[i][1] - P_m_a[i][1]) / (2.0 * d_a);
+
+		dP_db[i][0] = P_p_b[i][0];
+		dP_db[i][1] = (P_p_b[i][1] - P_m_b[i][1]) / (2.0 * d_b);
+	}
+
+	return;
+}
+
+inline void computeModifiedGammaMieDerivative(int n_theta, double wavelength, double r_c, double alpha, double gamma, std::complex<double> index, double& dsigma_s_dr_c, double& dsigma_a_dr_c, double& dsigma_e_dr_c, std::vector<std::vector<double>>& dP_dr_c, double& dsigma_s_dalpha, double& dsigma_a_dalpha, double& dsigma_e_dalpha, std::vector<std::vector<double>>& dP_dalpha, double& dsigma_s_dgamma, double& dsigma_a_dgamma, double& dsigma_e_dgamma, std::vector<std::vector<double>>& dP_dgamma)
+{
+	double eps = 1.0E-5;
+	double d_r_c = r_c * eps;
+	double d_alpha = alpha * eps;
+	double d_gamma = gamma * eps;
+
+	auto sd_p_r_c = generateModifiedGammaSizeDistribution(n_theta, r_c + d_r_c, alpha, gamma);
+	auto sd_m_r_c = generateModifiedGammaSizeDistribution(n_theta, r_c - d_r_c, alpha, gamma);
+
+	auto sd_p_alpha = generateModifiedGammaSizeDistribution(n_theta, r_c, alpha + d_alpha, gamma);
+	auto sd_m_alpha = generateModifiedGammaSizeDistribution(n_theta, r_c, alpha - d_alpha, gamma);
+	
+	auto sd_p_gamma = generateModifiedGammaSizeDistribution(n_theta, r_c, alpha, gamma + d_gamma);
+	auto sd_m_gamma = generateModifiedGammaSizeDistribution(n_theta, r_c, alpha, gamma - d_gamma);
+
+	double sigma_a_p_r_c, sigma_a_m_r_c, sigma_a_p_alpha, sigma_a_m_alpha, sigma_a_p_gamma, sigma_a_m_gamma;
+	double sigma_s_p_r_c, sigma_s_m_r_c, sigma_s_p_alpha, sigma_s_m_alpha, sigma_s_p_gamma, sigma_s_m_gamma;
+	double sigma_e_p_r_c, sigma_e_m_r_c, sigma_e_p_alpha, sigma_e_m_alpha, sigma_e_p_gamma, sigma_e_m_gamma;
+	std::vector<std::vector<double>> P_p_r_c, P_m_r_c, P_p_alpha, P_m_alpha, P_p_gamma, P_m_gamma;
+
+	computeMieScatteringSizeDistribution(n_theta, wavelength, sd_p_r_c[1], index, sigma_s_p_r_c, sigma_a_p_r_c, sigma_e_p_r_c, P_p_r_c);
+	computeMieScatteringSizeDistribution(n_theta, wavelength, sd_m_r_c[1], index, sigma_s_m_r_c, sigma_a_m_r_c, sigma_e_m_r_c, P_m_r_c);
+
+	computeMieScatteringSizeDistribution(n_theta, wavelength, sd_p_alpha[1], index, sigma_s_p_alpha, sigma_a_p_alpha, sigma_e_p_alpha, P_p_alpha);
+	computeMieScatteringSizeDistribution(n_theta, wavelength, sd_m_alpha[1], index, sigma_s_m_alpha, sigma_a_m_alpha, sigma_e_m_alpha, P_m_alpha);
+
+	computeMieScatteringSizeDistribution(n_theta, wavelength, sd_p_gamma[1], index, sigma_s_p_gamma, sigma_a_p_gamma, sigma_e_p_gamma, P_p_gamma);
+	computeMieScatteringSizeDistribution(n_theta, wavelength, sd_m_gamma[1], index, sigma_s_m_gamma, sigma_a_m_gamma, sigma_e_m_gamma, P_m_gamma);
+
+	dsigma_a_dr_c = (sigma_a_p_r_c - sigma_a_m_r_c) / (2.0 * d_r_c);
+	dsigma_s_dr_c = (sigma_s_p_r_c - sigma_s_m_r_c) / (2.0 * d_r_c);
+	dsigma_e_dr_c = (sigma_e_p_r_c - sigma_e_m_r_c) / (2.0 * d_r_c);
+	dsigma_a_dalpha = (sigma_a_p_alpha - sigma_a_m_alpha) / (2.0 * d_alpha);
+	dsigma_s_dalpha = (sigma_s_p_alpha - sigma_s_m_alpha) / (2.0 * d_alpha);
+	dsigma_e_dalpha = (sigma_e_p_alpha - sigma_e_m_alpha) / (2.0 * d_alpha);
+	dsigma_a_dgamma = (sigma_a_p_gamma - sigma_a_m_gamma) / (2.0 * d_gamma);
+	dsigma_s_dgamma = (sigma_s_p_gamma - sigma_s_m_gamma) / (2.0 * d_gamma);
+	dsigma_e_dgamma = (sigma_e_p_gamma - sigma_e_m_gamma) / (2.0 * d_gamma);
+
+	dP_dr_c.resize(n_theta, std::vector<double>(2, 0.0));
+	dP_dalpha.resize(n_theta, std::vector<double>(2, 0.0));
+	dP_dgamma.resize(n_theta, std::vector<double>(2, 0.0));
+	
+	for(int i = 0; i < n_theta; ++i)
+	{
+		dP_dr_c[i][0] = P_p_r_c[i][0];
+		dP_dr_c[i][1] = (P_p_r_c[i][1] - P_m_r_c[i][1]) / (2.0 * d_r_c);
+
+		dP_dalpha[i][0] = P_p_alpha[i][0];
+		dP_dalpha[i][1] = (P_p_alpha[i][1] - P_m_alpha[i][1]) / (2.0 * d_alpha);
+
+		dP_dgamma[i][0] = P_p_gamma[i][0];
+		dP_dgamma[i][1] = (P_p_gamma[i][1] - P_m_gamma[i][1]) / (2.0 * d_gamma);
+	}
+
+	return;
+}
+
+inline void computePowerLawMieDerivative(int n_theta, double wavelength, double pl_delta, double pl_r1, double pl_r2, std::complex<double> index, double& dsigma_s_dpl_delta, double& dsigma_a_dpl_delta, double& dsigma_e_dpl_delta, std::vector<std::vector<double>>& dP_dpl_delta, double& dsigma_s_dpl_r1, double& dsigma_a_dpl_r1, double& dsigma_e_dpl_r1, std::vector<std::vector<double>>& dP_dpl_r1, double& dsigma_s_dpl_r2, double& dsigma_a_dpl_r2, double& dsigma_e_dpl_r2, std::vector<std::vector<double>>& dP_dpl_r2)
+{
+	double eps = 1.0E-5;
+	double d_pl_delta = pl_delta * eps;
+	double d_pl_r1 = pl_r1 * eps;
+	double d_pl_r2 = pl_r2 * eps;
+
+	auto sd_p_pl_delta = generatePowerLawSizeDistribution(n_theta, pl_delta + d_pl_delta, pl_r1, pl_r2);
+	auto sd_m_pl_delta = generatePowerLawSizeDistribution(n_theta, pl_delta - d_pl_delta, pl_r1, pl_r2);
+
+	auto sd_p_pl_r1 = generatePowerLawSizeDistribution(n_theta, pl_delta, pl_r1 + d_pl_r1, pl_r2);
+	auto sd_m_pl_r1 = generatePowerLawSizeDistribution(n_theta, pl_delta, pl_r1 - d_pl_r1, pl_r2);
+	
+	auto sd_p_pl_r2 = generatePowerLawSizeDistribution(n_theta, pl_delta, pl_r1, pl_r2 + d_pl_r2);
+	auto sd_m_pl_r2 = generatePowerLawSizeDistribution(n_theta, pl_delta, pl_r1, pl_r2 - d_pl_r2);
+
+	double sigma_a_p_pl_delta, sigma_a_m_pl_delta, sigma_a_p_pl_r1, sigma_a_m_pl_r1, sigma_a_p_pl_r2, sigma_a_m_pl_r2;
+	double sigma_s_p_pl_delta, sigma_s_m_pl_delta, sigma_s_p_pl_r1, sigma_s_m_pl_r1, sigma_s_p_pl_r2, sigma_s_m_pl_r2;
+	double sigma_e_p_pl_delta, sigma_e_m_pl_delta, sigma_e_p_pl_r1, sigma_e_m_pl_r1, sigma_e_p_pl_r2, sigma_e_m_pl_r2;
+	std::vector<std::vector<double>> P_p_pl_delta, P_m_pl_delta, P_p_pl_r1, P_m_pl_r1, P_p_pl_r2, P_m_pl_r2;
+
+	computeMieScatteringSizeDistribution(n_theta, wavelength, sd_p_pl_delta[1], index, sigma_s_p_pl_delta, sigma_a_p_pl_delta, sigma_e_p_pl_delta, P_p_pl_delta);
+	computeMieScatteringSizeDistribution(n_theta, wavelength, sd_m_pl_delta[1], index, sigma_s_m_pl_delta, sigma_a_m_pl_delta, sigma_e_m_pl_delta, P_m_pl_delta);
+
+	computeMieScatteringSizeDistribution(n_theta, wavelength, sd_p_pl_r1[1], index, sigma_s_p_pl_r1, sigma_a_p_pl_r1, sigma_e_p_pl_r1, P_p_pl_r1);
+	computeMieScatteringSizeDistribution(n_theta, wavelength, sd_m_pl_r1[1], index, sigma_s_m_pl_r1, sigma_a_m_pl_r1, sigma_e_m_pl_r1, P_m_pl_r1);
+
+	computeMieScatteringSizeDistribution(n_theta, wavelength, sd_p_pl_r2[1], index, sigma_s_p_pl_r2, sigma_a_p_pl_r2, sigma_e_p_pl_r2, P_p_pl_r2);
+	computeMieScatteringSizeDistribution(n_theta, wavelength, sd_m_pl_r2[1], index, sigma_s_m_pl_r2, sigma_a_m_pl_r2, sigma_e_m_pl_r2, P_m_pl_r2);
+
+	dsigma_a_dpl_delta = (sigma_a_p_pl_delta - sigma_a_m_pl_delta) / (2.0 * d_pl_delta);
+	dsigma_s_dpl_delta = (sigma_s_p_pl_delta - sigma_s_m_pl_delta) / (2.0 * d_pl_delta);
+	dsigma_e_dpl_delta = (sigma_e_p_pl_delta - sigma_e_m_pl_delta) / (2.0 * d_pl_delta);
+	dsigma_a_dpl_r1 = (sigma_a_p_pl_r1 - sigma_a_m_pl_r1) / (2.0 * d_pl_r1);
+	dsigma_s_dpl_r1 = (sigma_s_p_pl_r1 - sigma_s_m_pl_r1) / (2.0 * d_pl_r1);
+	dsigma_e_dpl_r1 = (sigma_e_p_pl_r1 - sigma_e_m_pl_r1) / (2.0 * d_pl_r1);
+	dsigma_a_dpl_r2 = (sigma_a_p_pl_r2 - sigma_a_m_pl_r2) / (2.0 * d_pl_r2);
+	dsigma_s_dpl_r2 = (sigma_s_p_pl_r2 - sigma_s_m_pl_r2) / (2.0 * d_pl_r2);
+	dsigma_e_dpl_r2 = (sigma_e_p_pl_r2 - sigma_e_m_pl_r2) / (2.0 * d_pl_r2);
+
+	dP_dpl_delta.resize(n_theta, std::vector<double>(2, 0.0));
+	dP_dpl_r1.resize(n_theta, std::vector<double>(2, 0.0));
+	dP_dpl_r2.resize(n_theta, std::vector<double>(2, 0.0));
+	
+	for(int i = 0; i < n_theta; ++i)
+	{
+		dP_dpl_delta[i][0] = P_p_pl_delta[i][0];
+		dP_dpl_delta[i][1] = (P_p_pl_delta[i][1] - P_m_pl_delta[i][1]) / (2.0 * d_pl_delta);
+
+		dP_dpl_r1[i][0] = P_p_pl_r1[i][0];
+		dP_dpl_r1[i][1] = (P_p_pl_r1[i][1] - P_m_pl_r1[i][1]) / (2.0 * d_pl_r1);
+
+		dP_dpl_r2[i][0] = P_p_pl_r2[i][0];
+		dP_dpl_r2[i][1] = (P_p_pl_r2[i][1] - P_m_pl_r2[i][1]) / (2.0 * d_pl_r2);
+	}
+
+	return;
 }
 
 }

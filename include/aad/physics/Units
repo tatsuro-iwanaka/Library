@@ -21,15 +21,15 @@ inline UnitInfo getUnitInfo(std::string unit_input)
 {
 	std::string u = utils::toLower(unit_input);
 	// 長さ
-	if (u == "m") return { UnitDim::Length, 1.0 };
 	if (u == "km") return { UnitDim::Length, 1.0E3 };
+	if (u == "m") return { UnitDim::Length, 1.0 };
 	if (u == "cm") return { UnitDim::Length, 1.0E-2 };
 	if (u == "mm") return { UnitDim::Length, 1.0E-3 };
 	if (u == "um" || u == "micron") return { UnitDim::Length, 1.0E-6 };
 	if (u == "nm") return { UnitDim::Length, 1.0E-9 };
 	// 面積
-	if (u == "m2") return { UnitDim::Area, 1.0 };
 	if (u == "km2") return { UnitDim::Area, 1.0E6 };
+	if (u == "m2") return { UnitDim::Area, 1.0 };
 	if (u == "cm2") return { UnitDim::Area, 1.0E-4 };
 	if (u == "mm2") return { UnitDim::Area, 1.0E-6 };
 	if (u == "um2" || u == "micron2") return { UnitDim::Area, 1.0E-12 };
@@ -46,21 +46,23 @@ inline UnitInfo getUnitInfo(std::string unit_input)
 	if (u == "atm") return { UnitDim::Pressure, 101325.0};
 	if (u == "torr" || u=="mmhg") return { UnitDim::Pressure, 101325.0 / 760.0};
 	// --- 数密度 ---
+	if (u == "km-3" || u == "1/km3") return { UnitDim::NumberDensity, 1.0E-9 };
 	if (u == "m-3" || u == "1/m3") return { UnitDim::NumberDensity, 1.0 };
 	if (u == "cm-3" || u == "1/cm3") return { UnitDim::NumberDensity, 1.0E6 };
 	if (u == "mm-3" || u == "1/mm3") return { UnitDim::NumberDensity, 1.0E9 };
 	if (u == "um-3" || u == "1/um3" || u == "micron-3" || u == "1/micron3") return { UnitDim::NumberDensity, 1.0E18 };
 	if (u == "nm-3" || u == "1/nm3") return { UnitDim::NumberDensity, 1.0E27 };
 	// --- 柱数密度 ---
+	if (u == "km-2" || u == "1/km2") return { UnitDim::ColumnNumberDensity, 1.0E-4 };
 	if (u == "m-2" || u == "1/m2") return { UnitDim::ColumnNumberDensity, 1.0 };
 	if (u == "cm-2" || u == "1/cm2") return { UnitDim::ColumnNumberDensity, 1.0E4 };
 	if (u == "mm-2" || u == "1/mm2") return { UnitDim::ColumnNumberDensity, 1.0E6 };
 	if (u == "um-2" || u == "1/um2" || u == "micron-2" || u == "1/micron2") return { UnitDim::ColumnNumberDensity, 1.0E12 };
 	if (u == "nm-2" || u == "1/nm2") return { UnitDim::ColumnNumberDensity, 1.0E18 };
 	// --- 波数 ---
+	if (u == "km-1" || u == "1/km") return { UnitDim::Wavenumber, 1.0E-3 };
 	if (u == "m-1" || u == "1/m") return { UnitDim::Wavenumber, 1.0 };
 	if (u == "cm-1" || u == "1/cm" || u == "kayser") return { UnitDim::Wavenumber, 1.0E2 };
-	if (u == "km-1" || u == "1/km") return { UnitDim::Wavenumber, 1.0E-3 };
 	if (u == "um-1" || u == "1/um" || u == "micron-1"   || u == "1/micron") return { UnitDim::Wavenumber, 1.0E6 };
 	if (u == "nm-1" || u == "1/nm") return { UnitDim::Wavenumber, 1.0E9 };
 	// 無次元

@@ -262,22 +262,56 @@ inline physics::Configuration::Simulation ConfigurationLoader::loadSimulation_(c
 
 	std::string prefix = "simulation.";
 
+	simulation.simulation_name = getOptionalString_(kv, prefix + "name");
+	std::optional<std::string> simulation_name_warning;
+	if(!simulation.simulation_name.has_value())
+	{
+		simulation.simulation_name = "untitled";
+		simulation_name_warning = "Simulation name was not specified. Automatically set to '" + simulation.simulation_name.value() + "'.";
+	}
+
+	simulation.directory_name = getOptionalString_(kv, prefix + "directory");
+	std::optional<std::string> directory_name_warning;
+	if(!simulation.directory_name.has_value())
+	{
+		simulation.directory_name = "./" + simulation.simulation_name.value();
+		directory_name_warning = "Working directroy was not specified. Automatically set to \'" + simulation.directory_name.value() + "\'.";
+	}
+	if(simulation.directory_name.value()[simulation.directory_name.value().size() - 1] != '/')
+	{
+		simulation.directory_name = simulation.directory_name.value() + "/";
+	}
+
+	std::filesystem::path p(simulation.directory_name.value());
+	if (!std::filesystem::exists(p))
+	{
+		std::filesystem::create_directories(p);
+	}
+
 	std::optional<std::string> logfile_name = getOptionalString_(kv, prefix + "logfile");
 	std::optional<std::string> logfile_warning;
 	if(!logfile_name.has_value())
 	{
-		logfile_name = "log.txt";
+		logfile_name = "log_" + simulation.simulation_name.value_or("untitled") + ".txt";
 		logfile_warning = "Log file name was not specified. Automatically set to '" + logfile_name.value() + "'.";
 	}
-	global().addSink(logfile_name.value(), false);
+	global().addSink(simulation.directory_name.value() + logfile_name.value(), false);
 	global().setMinLevel(Level::Info);
+
+	if(directory_name_warning.has_value())
+	{
+		global().warn("Configuration::validateConfiguration") << directory_name_warning.value();
+	}
+	if(simulation_name_warning.has_value())
+	{
+		global().warn("Configuration::validateConfiguration") << simulation_name_warning.value();
+	}
 	if(logfile_warning.has_value())
 	{
 		global().warn("Configuration::validateConfiguration") << logfile_warning.value();
 	}
-	simulation.simulation_name = getOptionalString_(kv, prefix + "name");
+	
 	simulation.n_parallel = getOptionalInt_(kv, prefix + "n_parallel");
-	simulation.directory_name = getOptionalString_(kv, prefix + "directory");
 	simulation.result_name = getOptionalString_(kv, prefix + "result");
 	simulation.n_scattering_angle = getOptionalInt_(kv, prefix + "n_scattering_angle");
 	simulation.tau_initial_layer = getOptionalDouble_(kv, prefix + "tau_initial_layer");
@@ -350,6 +384,7 @@ inline physics::Configuration::Surface ConfigurationLoader::loadSurface_(const s
 	
 	surface.type = parseEnum_(getOptionalString_(kv, prefix + "type"), physics::map_surface_type);
 	surface.albedo = getOptionalDouble_(kv, prefix + "albedo");
+	surface.emissivity = getOptionalDouble_(kv, prefix + "emissivity");
 	surface.temperature = getOptionalDouble_(kv, prefix + "temperature");
 	surface.unit = getOptionalString_(kv, prefix + "unit");
 
@@ -695,7 +730,7 @@ inline physics::Configuration::Atmosphere ConfigurationLoader::loadAtmosphere_(c
 			}
 
 			// spectral_vertical用
-			s.filename_refractive_index_spectral_vertical = getOptionalString_(kv, base + "refractive_index.file");
+			s.filename_refractive_index_spectral_vertical = getOptionalString_(kv, base + "refractive_index.file.filename");
 			s.varname_refractive_index_spectral_vertical_altitude = getOptionalString_(kv, base + "refractive_index.file.varname.0");
 			s.varname_refractive_index_spectral_vertical_spectral = getOptionalString_(kv, base + "refractive_index.file.varname.1");
 			s.varname_refractive_index_spectral_vertical_nr = getOptionalString_(kv, base + "refractive_index.file.varname.2");

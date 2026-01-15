@@ -20,8 +20,8 @@ simulation:
       cutoff: 0.01
 
   grid:
-    type: gauss_radau
-    # type: regular
+    # type: gauss_radau
+    type: regular
     n_zenith_angle: 50
     # n_azimuth_angle: 125
     # n_fourier_mode: 61
@@ -51,6 +51,22 @@ atmosphere:
 
   species:
     0:
+      name: CO2
+      state: molecule
+      type: scatterer
+      scatter_type: rayleigh
+      scattering_cross_section:
+        type: external
+        file: 
+          filename: /home/iwanaka/Documents/CrossSection/netcdf/CO2_scattering_cross_section.nc
+          varname: [wavenumber, temperature, scattering_cross_section]
+      vertical_profile:
+        interpolation: exponential
+        unit: [km, mol/mol]
+        table:
+          - [0.0, 0.965]
+          - [100.0, 0.965]
+    1:
       name: SO2
       state: molecule
       type: absorber
@@ -67,7 +83,7 @@ atmosphere:
           - [48.0, 200.0E-6]
           - [70.0, 1.0E-07]
           - [100.0, 1.0E-07]
-    1:
+    2:
       name: Cloud_mode1
       state: aerosol
       scatter_type: mie
@@ -184,7 +200,7 @@ atmosphere:
           - [98, 15556.2]
           - [99, 11690.2]
           - [100, 8784.89]
-    2:
+    3:
       name: Cloud_mode2
       state: aerosol
       scatter_type: mie
@@ -301,7 +317,7 @@ atmosphere:
           - [9.80000000e+01, 1.06981232e+04]
           - [9.90000000e+01, 8.03939665e+03]
           - [1.00000000e+02, 6.04142403e+03]
-    3:
+    4:
       name: Cloud_mode2p
       state: aerosol
       scatter_type: mie
@@ -418,7 +434,7 @@ atmosphere:
           - [9.80000000e+01, 1.56956640e-09]
           - [9.90000000e+01, 5.77411209e-10]
           - [1.00000000e+02, 2.12417713e-10]
-    4:
+    5:
       name: Cloud_mode3
       state: aerosol
       scatter_type: mie
@@ -535,40 +551,3 @@ atmosphere:
           - [9.80000000e+01, 2.18803507e-11]
           - [9.90000000e+01, 8.04933117e-12]
           - [1.00000000e+02, 2.96118345e-12]
-    # 4:
-    #   name: OCS
-    #   state: molecule
-    #   type: absorber
-    #   absorption_cross_section:
-    #     type: external
-    #     file: 
-    #       filename: /home/iwanaka/Documents/CrossSection/netcdf/OCS_absorption_cross_section.nc
-    #       varname: [wavenumber, temperature, absorption_cross_section]
-    #   vertical_profile:
-    #     interpolation: exponential
-    #     unit: [km, mol/mol]
-    #     table:
-    #       - [10.0, 2.0E-5]
-    #       - [48.0, 200.0E-6]
-    #       - [70.0, 1.0E-07]
-    #       - [100.0, 1.0E-07]
-    # 5:
-    #   name: CO2
-    #   state: molecule
-    #   type: extinction
-    #   scatter_type: rayleigh
-    #   scattering_cross_section:
-    #     type: external
-    #     file:  /Users/tatsuro/Documents/CrossSection/CO2_scattering_cross_section.dat
-    #     unit: [nm, cm2]
-    #   absorption_cross_section:
-    #     type: external
-    #     file: /Users/tatsuro/Documents/CrossSection/CO2_absorption_cross_section.dat
-    #     unit: [nm, cm2]
-    #   vertical_profile:
-    #     interpolation: exponential
-    #     unit: [km, mol/mol]
-    #     table:
-    #       - [0.0, 0.965]
-    #       - [100.0, 0.965]
-   

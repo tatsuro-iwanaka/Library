@@ -259,11 +259,13 @@ inline physics::RadiativeTransferAjointResult RadiativeTransferSolver::computeMo
 		double scale_factor = 1.0 / std::pow(2.0, atmosphere_layer_rad[idx].n_doubling);
 		core_sens.optical_thickness *= scale_factor;
 
+		sensitivity.layers[i].optical = core_sens;
+
 		// io::global().info("RadiativeTransferSolver::computeMonochrome_adjoint") << "core_sens.scattering_phase_function.size() = " << core_sens.scattering_phase_function.size() << ", n_scattering_angle = " << n_scattering_angle;
 
 		for(size_t s = 0; s < atmosphere_model.species.size(); ++s)
 		{
-			// io::global().info("RadiativeTransferSolver::computeMonochrome_adjoint") << "Computing sensitivities for species = " << s;
+			io::global().info("RadiativeTransferSolver::computeMonochrome_adjoint") << "Computing sensitivities for species = " << s << ", for layer " << i;
 
 			const auto& species = atmosphere_model.species[s];
 			
@@ -287,6 +289,72 @@ inline physics::RadiativeTransferAjointResult RadiativeTransferSolver::computeMo
 			}
 
 			sensitivity.layers[i].species[s].mixing_ratio = sensitivity.layers[i].species[s].number_density * atmosphere_model.number_density[i];
+			// sensitivity.layers[i].species[s].log_mixing_ratio = sensitivity.layers[i].species[s].mixing_ratio * atmosphere_model.species[s].vertical_mixing_ratio_profile[i];
+
+			if(species.species_state == physics::SpeciesState::Aerosol)
+			{
+				sensitivity.layers[i].species[s].is_aerosol = true;
+
+				auto ri = utils::interpolateTableLinear(spectral, species.refractive_index[i]);
+				std::complex<double> refractive_index = {ri[0], ri[1]};
+
+				if(species.size_distribution_finction == physics::ParticleSizeDistribution::Delta)
+				{
+					double sa, ss, se;
+					std::vector<std::vector<double>> pf;
+					physics::computeDeltaMieDerivative(n_scattering_angle, wavelength, species.delta_r, refractive_index, ss, sa, se, pf);
+
+					double term_tau = delta_z * species.vertical_number_density_profile[i] * (sa + ss);
+					double term_omega = species.vertical_number_density_profile[i] * (-k_sca_total / ((k_ext_total * k_ext_total) * (k_ext_total * k_ext_total)) * sa + k_abs_total / ((k_ext_total * k_ext_total) * (k_ext_total * k_ext_total)) * ss);
+					double term_P = 0.0;
+					for(int k = 0; k < n_scattering_angle; ++k)
+					{
+						term_P += core_sens.scattering_phase_function[k][1] * pf[k][1] * atmosphere_layer_opt[i].species_scattering_cross_section[s] * species.vertical_number_density_profile[i] / k_sca_total;
+					}
+
+					sensitivity.layers[i].species[s].delta_r = (term_tau + term_omega + term_P);
+				}
+				else if(species.size_distribution_finction == physics::ParticleSizeDistribution::LogNormal)
+				{
+					double sa_r, ss_r, se_r;
+					double sa_sigma, ss_sigma, se_sigma;
+					std::vector<std::vector<double>> pf_r, pf_sigma;
+					io::global().info("RadiativeTransferSolver::computeMonochrome_adjoint") << "Computing finit difference for species = " << s << ", for layer " << i;
+					physics::computeLogNormalMieDerivative(n_scattering_angle, wavelength, species.lnd_r_g, species.lnd_sigma_g, refractive_index, ss_r, sa_r, se_r, pf_r, ss_sigma, sa_sigma, se_sigma, pf_sigma);
+					io::global().info("RadiativeTransferSolver::computeMonochrome_adjoint") << "Finished computing finit difference for species = " << s << ", for layer " << i;
+
+					double term_rg = 0.0;
+					double term_sigmag = 0.0;
+
+					{
+						double term_tau = delta_z * species.vertical_number_density_profile[i] * (sa_r + ss_r);
+						double term_omega = species.vertical_number_density_profile[i] * (-k_sca_total / ((k_ext_total * k_ext_total) * (k_ext_total * k_ext_total)) * sa_r + k_abs_total / ((k_ext_total * k_ext_total) * (k_ext_total * k_ext_total)) * ss_r);
+						double term_P = 0.0;
+						for(int k = 0; k < n_scattering_angle; ++k)
+						{
+							term_P += core_sens.scattering_phase_function[k][1] * pf_r[k][1] * atmosphere_layer_opt[i].species_scattering_cross_section[s] * species.vertical_number_density_profile[i] / k_sca_total;
+						}
+
+						sensitivity.layers[i].species[s].lnd_r_g = (term_tau + term_omega + term_P);
+					}
+
+					{
+						double term_tau = delta_z * species.vertical_number_density_profile[i] * (sa_sigma + ss_sigma);
+						double term_omega = species.vertical_number_density_profile[i] * (-k_sca_total / ((k_ext_total * k_ext_total) * (k_ext_total * k_ext_total)) * sa_sigma + k_abs_total / ((k_ext_total * k_ext_total) * (k_ext_total * k_ext_total)) * ss_sigma);
+						double term_P = 0.0;
+						for(int k = 0; k < n_scattering_angle; ++k)
+						{
+							term_P += core_sens.scattering_phase_function[k][1] * pf_sigma[k][1] * atmosphere_layer_opt[i].species_scattering_cross_section[s] * species.vertical_number_density_profile[i] / k_sca_total;
+						}
+
+						sensitivity.layers[i].species[s].lnd_sigma_g = (term_tau + term_omega + term_P);
+					}
+				}
+				else
+				{
+					// to be implemented
+				}
+			}
 		}
 	}
 
@@ -683,7 +751,7 @@ inline core::RadiativeLayer RadiativeTransferSolver::initializeSurfaceLayer_(con
 	for(int e = 0; e < geometry_.Ntheta; e ++)
 	{
 		// 上向き：一定輝度 Bsurf*ε/π
-		radiative_layer.source_up(e) = (1.0 - optical_layer.surface_albedo) * optical_layer.planck_function;
+		radiative_layer.source_up(e) = optical_layer.surface_emissivity * optical_layer.planck_function;
 		// 下向き放射はなし
 		radiative_layer.source_down(e) = 0.0;
 
@@ -871,6 +939,7 @@ inline physics::OpticalLayer RadiativeTransferSolver::setSurfaceLayerCondition_(
 	layer.enable_atmospheric_emission = atmosphere_model.enable_atmospheric_emission;
 
 	layer.surface_albedo = atmosphere_model.surface_albedo;
+	layer.surface_emissivity = atmosphere_model.surface_emissivity;
 
 	if(layer.enable_atmospheric_emission)
 	{

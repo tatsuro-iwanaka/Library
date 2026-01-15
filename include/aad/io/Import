@@ -242,6 +242,8 @@ inline std::vector<std::vector<std::vector<double>>> loadRefractiveIndexSpectral
 		size_t n_alt = v_alt.getDim(0).getSize();
 		size_t n_spec = v_spec.getDim(0).getSize();
 
+		// std::cout << n_alt << ", " << n_spec << std::endl;
+
 		// 2Dデータの次元チェック (念のため)
 		if (v_nr.getDimCount() != 2 || v_ni.getDimCount() != 2)
 		{
@@ -280,6 +282,7 @@ inline std::vector<std::vector<std::vector<double>>> loadRefractiveIndexSpectral
 		bool is_spectral_dimension_mismatch;
 		double scale_spec;
 
+		// std::cout << unit_target_spectral << ", " << source_unit_spec << std::endl;
 		if(physics::getUnitInfo(unit_target_spectral).dim != physics::getUnitInfo(source_unit_spec).dim)
 		{
 			is_spectral_dimension_mismatch = true;
@@ -299,6 +302,8 @@ inline std::vector<std::vector<std::vector<double>>> loadRefractiveIndexSpectral
 		for(auto& v : altitudes)
 		{
 			v *= scale_alt; // 単位変換
+
+			// std::cout << v << std::endl;
 		}
 
 		std::vector<double> spectral_grid(n_spec);
@@ -313,6 +318,8 @@ inline std::vector<std::vector<std::vector<double>>> loadRefractiveIndexSpectral
 			{
 				v = v * scale_spec; // 単位変換
 			}
+
+			// std::cout << v << std::endl;
 		}
 
 		// 5. 2Dデータの読み込み
@@ -345,6 +352,14 @@ inline std::vector<std::vector<std::vector<double>>> loadRefractiveIndexSpectral
 		}
 
 		std::sort(result.begin(), result.end(), [](const std::vector<std::vector<double>>& a, const std::vector<std::vector<double>>& b){return a[0][0] < b[0][0];});
+
+		// for(int i = 0; i < n_alt; ++i)
+		// {
+		// 	for(int j = 0; j < n_spec; ++j)
+		// 	{
+		// 		std::cout << result[i][j][0] << ", " << result[i][j][1] << ", " << result[i][j][2] << ", " << result[i][j][3] << std::endl;
+		// 	}
+		// }
 
 		return result;
 	}

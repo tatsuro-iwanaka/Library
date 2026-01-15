@@ -244,6 +244,15 @@ struct Species
 		SpeciesType species_type;
 		ScatterType scatter_type;
 
+		// for backward calculation
+		ParticleSizeDistribution size_distribution_finction;
+		double delta_r;
+		double lnd_r_g, lnd_sigma_g;
+		double rect_r_mean, rect_width;
+		double gd_a, gd_b;
+		double mgd_r_c, mgd_alpha, mgd_gamma;
+		double pl_delta, pl_r1, pl_r2;
+
 		std::vector<std::vector<double>> particle_size_distribution; // spectral, size_distribution
 		std::vector<std::vector<double>> weight_particle_size_distribution; // spectral, weights
 
@@ -282,6 +291,7 @@ class OpticalLayer
 
 		// for surface
 		double surface_albedo;
+		double surface_emissivity;
 
 		double asymmetry_parameter;
 
@@ -313,6 +323,7 @@ struct AtmosphereModel
 		SurfaceType surface_type;
 		double surface_temperature;
 		double surface_albedo;
+		double surface_emissivity;
 		bool enable_atmospheric_emission;
 		std::vector<double> altitude_bottom;
 		std::vector<double> altitude_top;
@@ -412,6 +423,7 @@ class Configuration
 		{
 			std::optional<SurfaceType> type;
 			std::optional<double> albedo; // dimensionless
+			std::optional<double> emissivity; // demisionless
 			std::optional<double> temperature;	//K
 			std::optional<std::string> unit;
 		};
@@ -654,9 +666,15 @@ struct SpeciesSensitivity
 	double number_density;
 	double mixing_ratio;
 	double log_mixing_ratio;
-	double r_g;
-	double sigma_g;
-	// ...
+	
+	bool is_aerosol;
+	ParticleSizeDistribution size_distribution_function;
+	double delta_r;
+	double lnd_r_g, lnd_sigma_g;
+	double rect_r_mean, rect_width;
+	double gd_a, gd_b;
+	double r_c, alpha, gamma;
+	double pl_delta, pl_r1, pl_r2;
 };
 
 struct LayerSensitivity
